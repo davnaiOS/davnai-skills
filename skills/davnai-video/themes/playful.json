@@ -1,0 +1,35 @@
+{
+  "name": "playful",
+  "colours": [
+    "#FF5DA2",
+    "#1B1B3A"
+  ],
+  "about": "Bright and bouncy: rounded tilted stickers, big friendly letters, pops. For lifestyle, kids' and food content.",
+  "caption_font": "Righteous-Regular.ttf",
+  "title_font": "Bungee-Regular.ttf",
+  "caption": {
+    "size": 0.075,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#FF5DA2",
+    "outline": 0.1,
+    "outlineColor": "#1B1B3A",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 3,
+    "anim": "bounce",
+    "keyScale": 1.2,
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "slide_up",
+    "look": "vivid"
+  },
+  "title_style": "bounce",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "pop"
+  },
+  "css": ".box{{border-radius:{g}px;transform:rotate(-2deg);box-shadow:0 {s}px 0 rgba(0,0,0,.25)}}.panel{{border-radius:{g}px;border-left:none;transform:rotate(1deg)}}"
+}

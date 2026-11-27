@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -547,6 +547,31 @@ THEME_CSS = {
     "luxury": ".box{{background:transparent;box-shadow:none;padding:0 0 {s}px;border-radius:0;border-bottom:1px solid {a};color:#fff;font-weight:400;letter-spacing:.04em}}.panel{{background:rgba(0,0,0,.45);border-left:1px solid {a}}}.full{{background:#0c0a08}}",
     "handwritten": ".box{{background:#FFF8C5;color:#111;border-radius:{h}px;transform:rotate(-3deg);box-shadow:0 {s}px {g}px rgba(0,0,0,.3);font-weight:400}}.panel{{background:#FFF8C5;color:#111;transform:rotate(1.5deg);border-left:none}}",
 }
+def load_theme_files() -> list[str]:
+    """Themes are also files: the skill's themes/ folder (one JSON file each) and the person's own in ~/.davnai/themes.
+    A file replaces the built-in theme of the same name or adds a new one. Returns problems found (bad files are skipped)."""
+    problems = []
+    for folder in (Path(__file__).resolve().parent.parent / "themes", BRAND_DIR.parent / "themes"):
+        for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                name = str(data.pop("name", path.stem))
+                css = data.pop("css", None)
+                base = json.loads(json.dumps(THEMES.get(data.get("base", name), THEMES["clean"])))
+                base.update({k: v for k, v in data.items() if k not in ("caption", "defaults", "sounds", "base")})
+                for key in ("caption", "defaults", "sounds"):
+                    base[key] = {**base.get(key, {}), **(data.get(key) or {})}
+                for key in ("caption_font", "title_font"):
+                    if base[key] not in FONT_SOURCES:
+                        raise ValueError(f"{key} {base[key]} isn't one of the theme fonts")
+                THEMES[name] = base
+                if css:
+                    THEME_CSS[name] = css
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                problems.append(f"{path.name}: {exc}")
+    return problems
+
+
 SOUND_RECIPES = {  # made by ffmpeg on the person's computer: no sound files to licence
     "whoosh": "anoisesrc=color=pink:d=0.55:a=0.7,highpass=f=300,lowpass=f=4500,afade=t=in:d=0.3,afade=t=out:st=0.3:d=0.25",
     "swoosh": "anoisesrc=color=pink:d=0.4:a=0.4,highpass=f=900,lowpass=f=6000,afade=t=in:d=0.2,afade=t=out:st=0.2:d=0.2",
@@ -557,6 +582,11 @@ SOUND_RECIPES = {  # made by ffmpeg on the person's computer: no sound files to 
     "riser": "aevalsrc='0.35*sin(2*PI*(200*t+300*t*t))*min(t/1.2,1)':d=1.4",
     "glitch": "aevalsrc='0.45*sgn(sin(2*PI*180*t))*gt(mod(floor(t*40),3),0)*exp(-t*3)':d=0.35",
 }
+
+
+BUILT_IN_THEMES = json.loads(json.dumps(THEMES))  # before any theme files: the one-file download's own copy
+BUILT_IN_CSS = dict(THEME_CSS)
+THEME_FILE_PROBLEMS = load_theme_files()
 
 
 def ensure_fonts(names) -> dict[str, Path]:
@@ -723,7 +753,9 @@ def cmd_themes(_args) -> None:
     say("Themes (\"theme\": \"<name>\" in the plan, or your own: {\"base\": \"bold\", \"caption\": {...}}):",
         *(f"  {n}: {t['about']} Fonts: {FONT_SOURCES[t['caption_font']][0]} / {FONT_SOURCES[t['title_font']][0]}. "
           f"Defaults: {', '.join(f'{k} {v}' for k, v in t['defaults'].items()) or 'none'}." for n, t in THEMES.items()),
-        "The Brand Kit's colours and caption accent recolour every theme (\"theme_colours\": true keeps the theme's own).")
+        "The Brand Kit's colours and caption accent recolour every theme (\"theme_colours\": true keeps the theme's own).",
+        f"Your own themes: JSON files in {BRAND_DIR.parent / 'themes'} (copy one from the skill's themes/ folder and change it).",
+        *(f"⚠ skipped theme file {p}" for p in THEME_FILE_PROBLEMS))
 
 
 def cmd_qc(args) -> None:

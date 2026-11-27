@@ -1,0 +1,34 @@
+{
+  "name": "editorial",
+  "colours": [
+    "#1C1917",
+    "#F5D0A9"
+  ],
+  "about": "Calm and premium: serif titles, one quiet line of captions at the top, film-like colour.",
+  "caption_font": "Poppins-Medium.ttf",
+  "title_font": "DMSerifDisplay-Regular.ttf",
+  "caption": {
+    "size": 0.056,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#F5D0A9",
+    "outline": 0.0,
+    "outlineColor": "#000000",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 6,
+    "anim": "type",
+    "place": "top"
+  },
+  "defaults": {
+    "transition": "fade",
+    "look": "cinematic"
+  },
+  "title_style": "glow",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "click"
+  },
+  "css": ".box{{background:transparent;box-shadow:none;padding:0 0 {s}px;border-radius:0;border-bottom:{h}px solid {a};font-weight:400}}.panel{{background:rgba(10,10,10,.6);border-left:none;border-top:{h}px solid {a}}}.full{{background:#0d0d0d}}"
+}

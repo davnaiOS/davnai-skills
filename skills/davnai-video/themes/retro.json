@@ -1,0 +1,34 @@
+{
+  "name": "retro",
+  "colours": [
+    "#C2410C",
+    "#3B1F0E"
+  ],
+  "about": "Retro: chunky letters, offset shadows, warm faded colour and film grain.",
+  "caption_font": "Bungee-Regular.ttf",
+  "title_font": "Bungee-Regular.ttf",
+  "caption": {
+    "size": 0.068,
+    "upper": true,
+    "color": "#FFF4D6",
+    "accent": "#FF8A3D",
+    "outline": 0.08,
+    "outlineColor": "#3B1F0E",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 3,
+    "anim": "pop",
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "dissolve",
+    "look": "retro"
+  },
+  "title_style": "bounce",
+  "sounds": {
+    "transition": "whoosh",
+    "motion": "pop"
+  },
+  "css": ".box{{border-radius:{h}px;border:{h}px solid #3B1F0E;box-shadow:{s}px {s}px 0 {a}}}.panel{{border:{h}px solid #3B1F0E;box-shadow:{s}px {s}px 0 {a}}}"
+}

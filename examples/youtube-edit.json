@@ -1,0 +1,58 @@
+{
+  "_about": "A full YouTube edit: mistakes and dead air removed, intro and outro from the Brand Kit, chapter cards and a logo.",
+  "source": "lesson.mp4",
+  "theme": "clean",
+  "outputs": [
+    {
+      "name": "youtube",
+      "aspect": "source",
+      "keep": [
+        [
+          1,
+          40
+        ],
+        [
+          44,
+          120
+        ],
+        [
+          125,
+          180
+        ]
+      ],
+      "tighten": true,
+      "logo": true,
+      "intro": true,
+      "outro": true,
+      "motion": [
+        {
+          "type": "chapter",
+          "number": 1,
+          "text": "Planning",
+          "lines": [
+            1,
+            1
+          ]
+        },
+        {
+          "type": "chapter",
+          "number": 2,
+          "text": "Filming",
+          "lines": [
+            44,
+            44
+          ]
+        },
+        {
+          "type": "chapter",
+          "number": 3,
+          "text": "Posting",
+          "lines": [
+            125,
+            125
+          ]
+        }
+      ]
+    }
+  ]
+}

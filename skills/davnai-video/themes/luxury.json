@@ -1,0 +1,34 @@
+{
+  "name": "luxury",
+  "colours": [
+    "#0C0A08",
+    "#E6C67A"
+  ],
+  "about": "Luxury: elegant display serif, thin gold lines, slow dissolves. For fashion, property and beauty.",
+  "caption_font": "Poppins-Medium.ttf",
+  "title_font": "AbrilFatface-Regular.ttf",
+  "caption": {
+    "size": 0.058,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#E6C67A",
+    "outline": 0.0,
+    "outlineColor": "#000000",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 5,
+    "anim": "fade",
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "dissolve",
+    "look": "soft"
+  },
+  "title_style": "glow",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "ding"
+  },
+  "css": ".box{{background:transparent;box-shadow:none;padding:0 0 {s}px;border-radius:0;border-bottom:1px solid {a};color:#fff;font-weight:400;letter-spacing:.04em}}.panel{{background:rgba(0,0,0,.45);border-left:1px solid {a}}}.full{{background:#0c0a08}}"
+}

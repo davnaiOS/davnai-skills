@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 *.davnai/
 .DS_Store
+!library/sounds/*.wav

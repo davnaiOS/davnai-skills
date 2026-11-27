@@ -1,0 +1,35 @@
+{
+  "name": "neon",
+  "colours": [
+    "#0B0B1A",
+    "#22D3EE"
+  ],
+  "about": "Night-time and techy: glowing outlines, dark panels, glitch cuts.",
+  "caption_font": "Audiowide-Regular.ttf",
+  "title_font": "Audiowide-Regular.ttf",
+  "caption": {
+    "size": 0.068,
+    "upper": true,
+    "color": "#FFFFFF",
+    "accent": "#22D3EE",
+    "outline": 0.05,
+    "outlineColor": "#22D3EE",
+    "shadow": false,
+    "box": null,
+    "karaoke": "word",
+    "words": 3,
+    "anim": "fade",
+    "glow": true,
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "glitch",
+    "look": "cool"
+  },
+  "title_style": "glow",
+  "sounds": {
+    "transition": "glitch",
+    "motion": "ding"
+  },
+  "css": ".box{{background:rgba(5,5,20,.55);border:{h}px solid {a};box-shadow:0 0 {g}px {a},inset 0 0 {s}px {a};text-shadow:0 0 {s}px {a}}}.panel{{border:{h}px solid {a};box-shadow:0 0 {g}px {a};background:rgba(5,5,20,.7)}}.full{{background:#05050f}}"
+}

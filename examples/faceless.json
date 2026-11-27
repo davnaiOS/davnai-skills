@@ -1,0 +1,54 @@
+{
+  "_about": "A faceless video: a voice-over (yours, a free AI voice or your Voicebox clone) over stock clips and pictures, timed by its transcript.",
+  "theme": "playful",
+  "outputs": [
+    {
+      "name": "faceless-1",
+      "aspect": "9:16",
+      "voice": "voiceover.wav",
+      "scenes": [
+        {
+          "lines": [
+            1,
+            2
+          ],
+          "clip": "clips/city.mp4"
+        },
+        {
+          "lines": [
+            3,
+            5
+          ],
+          "clip": "clips/laptop.jpg"
+        },
+        {
+          "lines": [
+            6,
+            8
+          ],
+          "clip": "clips/coffee.mp4",
+          "start": 2
+        }
+      ],
+      "transition": "slide_up",
+      "captions": true,
+      "music": "music/calm.mp3",
+      "beat_cuts": true,
+      "motion": [
+        {
+          "type": "list",
+          "title": "3 habits",
+          "items": [
+            "Wake early",
+            "Plan the day",
+            "Move"
+          ],
+          "lines": [
+            3,
+            8
+          ]
+        }
+      ]
+    }
+  ]
+}

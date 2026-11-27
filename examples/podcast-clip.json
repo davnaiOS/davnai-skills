@@ -1,0 +1,30 @@
+{
+  "_about": "A podcast clip from a wide two-person shot: whole frame on a blurred background, big centred captions, a cleaner voice.",
+  "source": "episode-12.mp4",
+  "theme": "podcast",
+  "outputs": [
+    {
+      "name": "clip-1",
+      "aspect": "9:16",
+      "keep": [
+        [
+          40,
+          52
+        ]
+      ],
+      "tighten": true,
+      "captions": true,
+      "emphasis": [
+        "never"
+      ],
+      "motion": [
+        {
+          "type": "title",
+          "text": "The advice I'd never give",
+          "at": "start",
+          "seconds": 2.5
+        }
+      ]
+    }
+  ]
+}

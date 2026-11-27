@@ -1,0 +1,33 @@
+{
+  "name": "clean",
+  "colours": [
+    "#4338CA",
+    "#0F172A"
+  ],
+  "about": "Friendly and modern: rounded brand-colour boxes, soft shadows, gentle pops.",
+  "caption_font": "Poppins-Bold.ttf",
+  "title_font": "Poppins-ExtraBold.ttf",
+  "caption": {
+    "size": 0.072,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#FACC15",
+    "outline": 0.05,
+    "outlineColor": "#000000",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 4,
+    "anim": "pop",
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "dissolve",
+    "look": "soft"
+  },
+  "title_style": "pop",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "pop"
+  }
+}

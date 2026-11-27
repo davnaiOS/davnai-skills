@@ -1,0 +1,117 @@
+"""Builds library/ (one page per theme, effect, graphic, transition, look, caption animation and sound) from the
+script's own lists, so the pages always match what davnai.py can do. Run: python tools/build_library.py
+(tests/test_library.py fails when the pages are out of date)."""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "skills" / "davnai-video" / "scripts"))
+import davnai  # noqa: E402
+
+LIB = ROOT / "library"
+
+EFFECTS = {
+    "behind": ("Big words behind the person", "The person is cut out and put back in front of huge words, so the words sit behind them.", "Hooks, a key word, a reveal.", '{ "type": "behind", "text": "MONEY", "lines": [12, 13] }'),
+    "shake": ("Camera shake", "A short handheld shake.", "Impact moments, punchlines, surprises.", '{ "type": "shake", "lines": [8, 8] }'),
+    "flash": ("Flash", "A quick bright flash (0.15 s).", "A cut on the beat, a reveal.", '{ "type": "flash", "lines": [5, 5] }'),
+    "rgb": ("Colour split", "Red and blue separate for a chromatic look.", "Energy, tech, music.", '{ "type": "rgb", "lines": [3, 4] }'),
+    "glitch": ("Glitch", "Colour split, noise and jitter.", "Tech, gaming, a 'wait, what?' moment.", '{ "type": "glitch", "lines": [9, 9] }'),
+    "blur": ("Blur", "A soft blur.", "A dreamy or thinking moment, behind a title.", '{ "type": "blur", "lines": [2, 2] }'),
+    "bw": ("Black and white", "Black and white for a moment.", "Flashbacks, 'before', serious points.", '{ "type": "bw", "lines": [6, 7] }'),
+    "vhs": ("VHS tape", "Faded colour, scan lines, noise.", "Nostalgia, throwbacks, old clips.", '{ "type": "vhs", "lines": [10, 12] }'),
+    "grain": ("Film grain", "Fine moving grain.", "A film feel; usually the whole video.", '{ "type": "grain", "all": true }'),
+    "light_leak": ("Light leak", "Warm light washes across the picture.", "Openers, travel, lifestyle, soft transitions.", '{ "type": "light_leak", "lines": [1, 2] }'),
+}
+MOTION = {
+    "title": ("Animated title", "A headline in a brand-colour box: pop, slide, bounce, words, typewriter or glow.", '{ "type": "title", "text": "3 mistakes nobody tells you", "style": "words", "at": "start", "seconds": 2.5 }'),
+    "lower_third": ("Name tag", "Name and role slide in with an accent bar.", '{ "type": "lower_third", "name": "Ada Obi", "role": "Founder", "lines": [2, 3] }'),
+    "callout": ("Callout", "A bubble that pops in and wiggles.", '{ "type": "callout", "text": "FREE", "emoji": "🔥", "position": "top-right", "lines": [7, 7] }'),
+    "emoji": ("Emoji", "A big emoji pops in.", '{ "type": "emoji", "emoji": "😱", "position": "middle", "lines": [4, 4] }'),
+    "counter": ("Counter", "A number counts up.", '{ "type": "counter", "from": 0, "to": 10000, "suffix": "+", "label": "followers", "lines": [9, 9] }'),
+    "list": ("List", "Points tick in one by one.", '{ "type": "list", "title": "3 steps", "items": ["Plan", "Film", "Post"], "lines": [14, 18] }'),
+    "chart": ("Chart", "Bars grow in.", '{ "type": "chart", "title": "Views", "bars": [{ "label": "Jan", "value": 10 }, { "label": "Feb", "value": 40 }], "lines": [20, 21] }'),
+    "quote": ("Quote card", "A full-screen quote in the brand colour.", '{ "type": "quote", "text": "Done beats perfect.", "author": "Ada", "lines": [11, 11] }'),
+    "chapter": ("Chapter card", "A full-screen chapter card wipes in and out.", '{ "type": "chapter", "number": 2, "text": "Filming", "lines": [15, 15] }'),
+    "end_screen": ("End screen", "Logo, text, handle and a pulsing button.", '{ "type": "end_screen", "text": "Follow for more", "at": "end", "seconds": 3 }'),
+    "block": ("Catalog scene", "Any of HyperFrames' ready-made scenes (follow buttons, phone screens, charts).", '{ "type": "block", "name": "tiktok-follow", "at": "end", "seconds": 3 }'),
+    "custom": ("Your own graphic", "An HTML fragment your AI writes, animated with GSAP.", '{ "type": "custom", "html": "motion/burst.html", "lines": [12, 12] }'),
+}
+TRANSITIONS = {
+    "fade": "Dips to black.", "flash": "A white flash.", "dissolve": "One shot melts into the next.", "whip": "A fast smooth slide.",
+    "slide": "Slides left.", "slide_up": "Slides up.", "zoom": "Zooms into the next shot.", "wipe": "A straight wipe.",
+    "circle": "Opens in a circle.", "glitch": "A pixel glitch.", "blur": "A horizontal blur.",
+}
+LOOKS = {
+    "warm": "Golden, friendly.", "cool": "Blue, clean.", "vivid": "Rich colour.", "punchy": "Contrast and sharpness.", "bw": "Black and white.",
+    "cinematic": "Film colour with a vignette.", "soft": "Gentle and bright.", "vintage": "Faded film.", "retro": "Faded film with grain.",
+}
+ANIMS = {"pop": "Grows in.", "bounce": "Drops and bounces.", "fade": "Fades in.", "slide": "Tips forward into place.", "type": "Word by word.", "none": "Appears."}
+SOUNDS = {"whoosh": "Air rushing past.", "swoosh": "A light quick swish.", "pop": "A bubbly pop.", "click": "A crisp tick.", "ding": "A bell.", "impact": "A deep hit.", "riser": "Rising tension.", "glitch": "A digital stutter."}
+
+
+def page(title: str, *parts: str) -> str:
+    return f"# {title}\n\n" + "\n\n".join(p.strip() for p in parts if p) + "\n"
+
+
+def build() -> dict[str, str]:
+    assert set(EFFECTS) == set(davnai.FX_TYPES), "describe every effect"
+    assert set(MOTION) == set(davnai.MOTION_TYPES), "describe every graphic"
+    assert set(TRANSITIONS) == set(davnai.TRANSITIONS) and set(LOOKS) == set(davnai.LOOKS) and set(SOUNDS) == set(davnai.SOUND_RECIPES)
+    files: dict[str, str] = {}
+    index = ["# Library", "", "Everything the Davnai skill can put in a video. Each page says what it does, when to use it and the exact plan line. Pictures of each are in [gallery/](../gallery/) as they're added.", ""]
+
+    index += ["## Themes (12)", "", "| theme | feels | fonts | defaults |", "|---|---|---|---|"]
+    for name, t in davnai.THEMES.items():
+        fonts = f"{davnai.FONT_SOURCES[t['caption_font']][0]} / {davnai.FONT_SOURCES[t['title_font']][0]}"
+        defaults = ", ".join(f"{k} {v}" for k, v in t["defaults"].items()) or "none"
+        index.append(f"| [{name}](../skills/davnai-video/themes/{name}.json) | {t['about']} | {fonts} | {defaults} |")
+
+    index += ["", f"## Signature effects ({len(EFFECTS)})", "", "| effect | what it does | plan |", "|---|---|---|"]
+    for key, (title, what, when, plan) in EFFECTS.items():
+        files[f"effects/{key}.md"] = page(title, what, f"**Use it for:** {when}", f'**In the plan** (inside `"fx": [...]`):\n\n```json\n{plan}\n```', "Optional: `\"strength\"` (default 1). Place it with `\"lines\"`, `\"all\": true` or `\"at\": \"start\"`/`\"end\"`.")
+        index.append(f"| [{title}](effects/{key}.md) | {what} | `\"type\": \"{key}\"` |")
+
+    index += ["", f"## Motion graphics ({len(MOTION)})", "", "In the brand's colours and fonts, made with HyperFrames (`setup --motion`).", "", "| graphic | what it does |", "|---|---|"]
+    for key, (title, what, plan) in MOTION.items():
+        files[f"motion/{key}.md"] = page(title, what, f'**In the plan** (inside `"motion": [...]`):\n\n```json\n{plan}\n```', "Full options: [reference/motion.md](../../skills/davnai-video/reference/motion.md).")
+        index.append(f"| [{title}](motion/{key}.md) | {what} |")
+
+    index += ["", f"## Transitions ({len(TRANSITIONS)})", "", "Between the parts of `keep` (or faceless scenes): `\"transition\": \"<name>\"`.", ""]
+    index += [f"- **{k}**: {v}" for k, v in TRANSITIONS.items()]
+    files["transitions.md"] = page("Transitions", "\n".join(f"- **{k}**: {v}" for k, v in TRANSITIONS.items()), '```json\n"transition": "flash"\n```', "Themes pick one for you; the plan can change it. Talking videos: cut or flash. Faceless: slide or dissolve.")
+
+    index += ["", f"## Colour looks ({len(LOOKS)})", "", "`\"look\": \"<name>\"`.", ""]
+    index += [f"- **{k}**: {v}" for k, v in LOOKS.items()]
+    files["looks.md"] = page("Colour looks", "\n".join(f"- **{k}**: {v}" for k, v in LOOKS.items()), '```json\n"look": "warm"\n```')
+
+    index += ["", f"## Caption animations ({len(ANIMS)})", "", "`\"caption_animation\": \"<name>\"` (or the theme's).", ""]
+    index += [f"- **{k}**: {v}" for k, v in ANIMS.items()]
+    files["captions.md"] = page("Caption animations", "\n".join(f"- **{k}**: {v}" for k, v in ANIMS.items()), '```json\n"captions": true,\n"caption_animation": "pop",\n"emphasis": ["free", "mistake"]\n```', "Captions use the Brand Kit's caption style or the theme's, and keep clear of the app buttons on tall videos.")
+
+    index += ["", f"## Built-in sounds ({len(SOUNDS)})", "", "Made by ffmpeg on your computer: nothing to licence. Listen in [sounds/](sounds/).", ""]
+    index += [f"- **{k}** ([listen](sounds/{k}.wav)): {v}" for k, v in SOUNDS.items()]
+    files["sounds.md"] = page("Built-in sounds", "\n".join(f"- **{k}** ([listen](sounds/{k}.wav)): {v}" for k, v in SOUNDS.items()), '```json\n"sfx": [{ "line": 14, "file": "whoosh" }]\n```', "Themes add a sound on each transition and graphic; `\"sounds\": false` turns those off.")
+
+    index += ["", "## More", "", "- Split screen, beat sync, B-roll, picture-in-picture, zoom, speed, music, end cards: [reference/effects.md](../skills/davnai-video/reference/effects.md)",
+              "- 448 ready-made HyperFrames pieces: `python davnai.py catalog <words>`", "- Ready plans to copy: [examples/](../examples/)"]
+    files["README.md"] = "\n".join(index) + "\n"
+    return files
+
+
+def write() -> None:
+    for rel, text in build().items():
+        path = LIB / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    sounds = LIB / "sounds"
+    sounds.mkdir(exist_ok=True)
+    davnai.SOUNDS_DIR = sounds
+    for name in davnai.SOUND_RECIPES:
+        davnai.sound_file(name)
+    print(f"Wrote {LIB}")
+
+
+if __name__ == "__main__":
+    write()

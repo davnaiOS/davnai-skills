@@ -1,0 +1,33 @@
+{
+  "name": "handwritten",
+  "colours": [
+    "#FDE047",
+    "#111111"
+  ],
+  "about": "Creator notebook: marker handwriting, tilted notes, casual pops.",
+  "caption_font": "PermanentMarker-Regular.ttf",
+  "title_font": "PermanentMarker-Regular.ttf",
+  "caption": {
+    "size": 0.07,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#FDE047",
+    "outline": 0.08,
+    "outlineColor": "#111111",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 3,
+    "anim": "pop",
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "whip"
+  },
+  "title_style": "words",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "pop"
+  },
+  "css": ".box{{background:#FFF8C5;color:#111;border-radius:{h}px;transform:rotate(-3deg);box-shadow:0 {s}px {g}px rgba(0,0,0,.3);font-weight:400}}.panel{{background:#FFF8C5;color:#111;transform:rotate(1.5deg);border-left:none}}"
+}

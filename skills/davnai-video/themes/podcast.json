@@ -1,0 +1,34 @@
+{
+  "name": "podcast",
+  "colours": [
+    "#1E3A8A",
+    "#0F172A"
+  ],
+  "about": "Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out.",
+  "caption_font": "Poppins-ExtraBold.ttf",
+  "title_font": "Poppins-ExtraBold.ttf",
+  "caption": {
+    "size": 0.075,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#60A5FA",
+    "outline": 0.08,
+    "outlineColor": "#000000",
+    "shadow": true,
+    "box": null,
+    "karaoke": "word",
+    "words": 3,
+    "anim": "pop",
+    "keyScale": 1.15,
+    "place": "middle"
+  },
+  "defaults": {
+    "fill": "blur",
+    "clean_audio": true
+  },
+  "title_style": "pop",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "pop"
+  }
+}

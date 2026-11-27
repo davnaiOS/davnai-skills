@@ -7,4 +7,4 @@ This folder holds Davnai's skills: `skills/davnai-video` (editing on this comput
 - Show previews and wait for the person's OK before the final; ask before uploading.
 - Clips and pictures: the person's own first, then free stock, then your own app's pictures; Davnai's picture tools only when asked.
 
-Working on the skill itself: keep `SKILL.md` short (details go in `reference/`), keep the script to Python's standard library plus ffmpeg (faster-whisper and fonttools are optional), and run `python skills/davnai-video/scripts/davnai.py check` after changes.
+Working on the skill itself: keep `SKILL.md` short (details go in `reference/`), keep `themes/*.json` the same as the script's built-in themes and run `python tools/build_library.py` after changing themes, effects, graphics or sounds (tests check both), keep the script to Python's standard library plus ffmpeg (faster-whisper and fonttools are optional), and run `python skills/davnai-video/scripts/davnai.py check` after changes.

@@ -1,0 +1,36 @@
+{
+  "name": "news",
+  "colours": [
+    "#B91C1C",
+    "#111111"
+  ],
+  "about": "Newsroom: solid bars, uppercase headlines, straight wipes. For updates, explainers and commentary.",
+  "caption_font": "ArchivoBlack-Regular.ttf",
+  "title_font": "BebasNeue-Regular.ttf",
+  "caption": {
+    "size": 0.06,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#FFFFFF",
+    "outline": 0.0,
+    "outlineColor": "#000000",
+    "shadow": false,
+    "box": {
+      "color": "#111111",
+      "alpha": 0.85
+    },
+    "karaoke": "none",
+    "words": 5,
+    "anim": "fade",
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "wipe"
+  },
+  "title_style": "slide",
+  "sounds": {
+    "transition": "swoosh",
+    "motion": "click"
+  },
+  "css": ".box{{border-radius:0;box-shadow:none;border-left:{s}px solid {a};text-transform:uppercase}}.panel{{border-radius:0;border-left:{s}px solid {p}}}.lt-name{{text-transform:uppercase}}"
+}

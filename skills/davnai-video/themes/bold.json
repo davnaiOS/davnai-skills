@@ -1,0 +1,37 @@
+{
+  "name": "bold",
+  "colours": [
+    "#111111",
+    "#FFE14D"
+  ],
+  "about": "Loud and punchy: big uppercase words, hard shadows, flashes and zooms. For hooks and fast talkers.",
+  "caption_font": "Anton-Regular.ttf",
+  "title_font": "Anton-Regular.ttf",
+  "caption": {
+    "size": 0.095,
+    "upper": true,
+    "color": "#FFFFFF",
+    "accent": "#FFE14D",
+    "outline": 0.12,
+    "outlineColor": "#000000",
+    "shadow": false,
+    "box": null,
+    "karaoke": "word",
+    "words": 2,
+    "anim": "bounce",
+    "keyScale": 1.15,
+    "place": "middle"
+  },
+  "defaults": {
+    "transition": "flash",
+    "look": "punchy",
+    "auto_zoom": true,
+    "progress_bar": true
+  },
+  "title_style": "words",
+  "sounds": {
+    "transition": "whoosh",
+    "motion": "impact"
+  },
+  "css": ".box{{border-radius:0;box-shadow:{s}px {s}px 0 #000;text-transform:uppercase}}.title{{font-size:{t}px}}.lt-name,.lt-role{{text-transform:uppercase}}"
+}

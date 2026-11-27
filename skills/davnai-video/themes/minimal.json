@@ -1,0 +1,28 @@
+{
+  "name": "minimal",
+  "colours": [
+    "#18181B",
+    "#3F3F46"
+  ],
+  "about": "Quiet and simple: small captions at the top, plain cuts, no boxes.",
+  "caption_font": "Poppins-Medium.ttf",
+  "title_font": "Poppins-Bold.ttf",
+  "caption": {
+    "size": 0.05,
+    "upper": false,
+    "color": "#FFFFFF",
+    "accent": "#FFFFFF",
+    "outline": 0.03,
+    "outlineColor": "#000000",
+    "shadow": true,
+    "box": null,
+    "karaoke": "none",
+    "words": 7,
+    "anim": "fade",
+    "place": "top"
+  },
+  "defaults": {},
+  "title_style": "slide",
+  "sounds": {},
+  "css": ".box{{background:transparent;box-shadow:none;padding:0;text-shadow:0 2px 12px rgba(0,0,0,.6)}}.title{{font-weight:500}}.panel{{background:rgba(0,0,0,.35);border-left:none}}"
+}

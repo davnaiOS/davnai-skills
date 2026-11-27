@@ -51,16 +51,26 @@ Your AI sets this up for you: it runs `python davnai.py check`, asks you, then `
 - An AI app that can run commands on your computer (Claude Code, Claude desktop with a folder, Codex, Gemini CLI, Cursor). In ChatGPT or Claude in the browser, upload your video with Davnai's upload card and Davnai edits it instead.
 - A [Davnai](https://davnai.com) account (free to start) to post, schedule and automate.
 
+## Browse what it can do
+
+- **[library/](library/)**: every theme, effect, motion graphic, transition, colour look, caption animation and sound, with the plan line to use it (and the sounds to listen to).
+- **[examples/](examples/)**: ready plans to copy: talking-head Short, podcast clip, faceless video, YouTube edit, split-screen gameplay, words behind you.
+- **[skills/davnai-video/themes/](skills/davnai-video/themes/)**: the 12 themes as files. Copy one to `~/.davnai/themes/` and change it to make your own.
+
 ## What's inside
 
 ```
 skills/davnai-video/
   SKILL.md            the steps and rules your AI follows
   reference/          Shorts, long edits, faceless videos, captions, themes, effects, motion graphics, stock, uploading
+  themes/             the 12 themes, one file each
   scripts/davnai.py   the editing script (Python + ffmpeg)
+library/              one page per theme, effect, graphic, transition, look and sound
+examples/             ready plans to copy
 skills/davnai-posts/  writing, grading, repurposing and scheduling posts
 skills/davnai-hooks/  100 hook formulas
 skills/davnai-coach/  the front door
+tools/                builds library/ from the script (python tools/build_library.py)
 tests/                tests for the script (python -m pytest tests)
 .claude-plugin/       Claude Code plugin and marketplace
 .mcp.json             connects Davnai (https://davnai.com/mcp)

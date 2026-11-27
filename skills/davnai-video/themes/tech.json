@@ -1,0 +1,37 @@
+{
+  "name": "tech",
+  "colours": [
+    "#0B0F14",
+    "#34D399"
+  ],
+  "about": "Developer and product: monospace type, typed-in captions, dark panels with a code feel.",
+  "caption_font": "SpaceMono-Bold.ttf",
+  "title_font": "SpaceMono-Bold.ttf",
+  "caption": {
+    "size": 0.055,
+    "upper": false,
+    "color": "#E5E7EB",
+    "accent": "#34D399",
+    "outline": 0.0,
+    "outlineColor": "#000000",
+    "shadow": false,
+    "box": {
+      "color": "#0B0F14",
+      "alpha": 0.8
+    },
+    "karaoke": "word",
+    "words": 5,
+    "anim": "type",
+    "place": "bottom"
+  },
+  "defaults": {
+    "transition": "glitch",
+    "look": "cool"
+  },
+  "title_style": "typewriter",
+  "sounds": {
+    "transition": "glitch",
+    "motion": "click"
+  },
+  "css": ".box{{border-radius:{h}px;background:#0B0F14;border:{h}px solid {a};color:{a};box-shadow:none}}.panel{{background:#0B0F14;border-left:{h}px solid {a}}}"
+}

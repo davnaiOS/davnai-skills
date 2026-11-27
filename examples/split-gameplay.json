@@ -1,0 +1,24 @@
+{
+  "_about": "Talking on top, gameplay (or any B-roll) underneath, captions on the middle line.",
+  "source": "story.mp4",
+  "theme": "bold",
+  "outputs": [
+    {
+      "name": "split-1",
+      "aspect": "9:16",
+      "keep": [
+        [
+          3,
+          20
+        ]
+      ],
+      "tighten": true,
+      "captions": true,
+      "split": {
+        "clip": "clips/gameplay.mp4",
+        "position": "bottom",
+        "share": 0.4
+      }
+    }
+  ]
+}

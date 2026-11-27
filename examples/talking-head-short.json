@@ -1,0 +1,51 @@
+{
+  "_about": "A punchy Short from a talking-head recording: hook first, big captions, zooms, a name tag and an end screen.",
+  "source": "my-video.mp4",
+  "theme": "bold",
+  "outputs": [
+    {
+      "name": "short-1",
+      "title": "3 mistakes",
+      "aspect": "9:16",
+      "keep": [
+        [
+          14,
+          19
+        ]
+      ],
+      "tighten": true,
+      "captions": true,
+      "emphasis": [
+        "mistake",
+        "free"
+      ],
+      "hook_text": "3 mistakes nobody tells you",
+      "motion": [
+        {
+          "type": "lower_third",
+          "name": "Your Name",
+          "role": "What you do",
+          "lines": [
+            15,
+            15
+          ]
+        },
+        {
+          "type": "end_screen",
+          "text": "Follow for more",
+          "at": "end",
+          "seconds": 2.5
+        }
+      ],
+      "fx": [
+        {
+          "type": "flash",
+          "lines": [
+            17,
+            17
+          ]
+        }
+      ]
+    }
+  ]
+}

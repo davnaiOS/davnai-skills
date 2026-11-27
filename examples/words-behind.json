@@ -1,0 +1,37 @@
+{
+  "_about": "Big words behind you on the key line, a beat pulse under music, and a warm light leak to open.",
+  "source": "my-video.mp4",
+  "theme": "editorial",
+  "outputs": [
+    {
+      "name": "behind-1",
+      "aspect": "9:16",
+      "keep": [
+        [
+          5,
+          12
+        ]
+      ],
+      "captions": true,
+      "music": "music/beat.mp3",
+      "beat_pulse": true,
+      "fx": [
+        {
+          "type": "behind",
+          "text": "FOCUS",
+          "lines": [
+            7,
+            8
+          ]
+        },
+        {
+          "type": "light_leak",
+          "lines": [
+            5,
+            5
+          ]
+        }
+      ]
+    }
+  ]
+}
