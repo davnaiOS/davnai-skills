@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -301,6 +301,20 @@ def transcript_path(source: Path) -> Path:
     return workdir(source) / "transcript.json"
 
 
+def speech_audio(source: Path):
+    """The sound as 16 kHz mono samples, read by ffmpeg, so the speech model never depends on PyAV's version
+    (some PyAV releases don't fit some faster-whisper releases). Falls back to the file path without numpy."""
+    try:
+        import numpy as np
+    except ImportError:
+        return str(source)
+    proc = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0 or not proc.stdout:
+        raise Problem(f"Couldn't read the sound in {source.name}: " + proc.stderr.decode("utf-8", "replace").strip()[-300:])
+    return np.frombuffer(proc.stdout, dtype=np.float32).copy()
+
+
 def load_transcript(source: Path) -> dict:
     path = transcript_path(source)
     if not path.exists():
@@ -341,8 +355,12 @@ def cmd_transcribe(args) -> None:
     except ImportError as exc:
         raise Problem("Transcripts need faster-whisper: pip install faster-whisper") from exc
     say(f"Transcribing {source.name} ({info['seconds'] / 60:.1f} min) with the '{args.model}' model on this computer...")
-    model = WhisperModel(args.model, device="auto", compute_type="int8")
-    segments, details = model.transcribe(str(source), word_timestamps=True, vad_filter=True, language=args.language)
+    try:
+        model = WhisperModel(args.model, device="auto", compute_type="int8")
+    except Exception as exc:  # the first run downloads the model from Hugging Face
+        raise Problem(f"Couldn't get the '{args.model}' speech model. The first transcript downloads it from huggingface.co "
+                      f"(about 150 to 500 MB), so this computer needs internet access to that site once. ({type(exc).__name__}: {str(exc)[:160]})") from exc
+    segments, details = model.transcribe(speech_audio(source), word_timestamps=True, vad_filter=True, language=args.language)
     words = []
     for seg in segments:
         for w in seg.words or []:
@@ -3124,7 +3142,8 @@ def cmd_setup(args) -> None:
         label = "Node.js 22 or newer" if tool == "node" else "ffmpeg"
         if hint and ask(f"Install {label} with: {' '.join(hint)}?", args.yes):
             ok = subprocess.run(hint).returncode == 0
-            restart = restart or (ok and sys.platform == "win32")
+            find_new_installs()
+            restart = restart or (ok and sys.platform == "win32" and not shutil.which("ffmpeg" if tool == "ffmpeg" else "node"))
             lines.append(f"✓ {label} installed" if ok else f"✗ {label} didn't install. Try: {' '.join(hint)}")
         elif not hint:
             lines.append(f"✗ {label}: install it from {'https://nodejs.org' if tool == 'node' else 'https://ffmpeg.org/download.html'} (Linux: sudo apt install {'nodejs' if tool == 'node' else 'ffmpeg'})")
@@ -3288,12 +3307,27 @@ def cmd_upload(args) -> None:
 # ---------------------------------------------------------------- main
 
 
+def find_new_installs() -> None:
+    """Windows: programs installed a moment ago (winget, Node.js) aren't on this terminal's PATH until it's reopened,
+    so look in the usual places and add what's there."""
+    if sys.platform != "win32":
+        return
+    local, prog = os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", r"C:\Program Files")
+    places = [Path(local) / "Microsoft" / "WinGet" / "Links", Path(prog) / "nodejs"]
+    places += sorted((Path(local) / "Microsoft" / "WinGet" / "Packages").glob("Gyan.FFmpeg*/*/bin")) if local else []
+    have = os.environ.get("PATH", "").split(os.pathsep)
+    extra = [str(p) for p in places if p.is_dir() and str(p) not in have]
+    if extra:
+        os.environ["PATH"] = os.pathsep.join(have + extra)
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):  # Windows terminals: ✓ and ⚠ must never crash the script
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+    find_new_installs()
     parser = argparse.ArgumentParser(prog="davnai.py", description="Davnai video editing on your own computer.")
     parser.add_argument("--version", action="version", version=VERSION)
     sub = parser.add_subparsers(dest="command", required=True)

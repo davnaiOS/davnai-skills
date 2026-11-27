@@ -538,3 +538,22 @@ def test_studio_effect_renders(tmp_path):
     proc = subprocess.run([sys.executable, str(davnai.ENGINE), "--plan", str(plan), str(clip), str(out), "--width", "180"], env=env, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert davnai.probe(out)["width"] == 180
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_speech_audio_is_read_by_ffmpeg(tmp_path):
+    pytest.importorskip("numpy")
+    clip = tmp_path / "s.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1.5", "-f", "lavfi", "-i", "color=s=64x64:d=1.5", "-shortest", str(clip)], check=True)
+    audio = davnai.speech_audio(clip)
+    assert str(audio.dtype) == "float32" and abs(len(audio) / 16000 - 1.5) < 0.1
+
+
+def test_new_windows_installs_are_found(tmp_path, monkeypatch):
+    links = tmp_path / "Microsoft" / "WinGet" / "Links"
+    links.mkdir(parents=True)
+    monkeypatch.setattr(davnai.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("PATH", "C:/x")
+    davnai.find_new_installs()
+    assert str(links) in __import__("os").environ["PATH"]
