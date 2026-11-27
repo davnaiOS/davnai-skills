@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -257,6 +257,11 @@ def cmd_brand(args) -> None:
     pack["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     (BRAND_DIR / "brand.json").write_text(json.dumps(pack, indent=1), encoding="utf-8")
     colours = ", ".join(c.get("hex", "") for c in pack.get("colours", [])[:5]) or "none"
+    missing = [label for label, ok in (("colours", pack.get("colours")), ("logo", pack.get("logo")), ("handle", pack.get("handle")), ("voice", pack.get("voice"))) if not ok]
+    if missing:
+        say(f"Their Brand Kit has no {', '.join(missing)} yet. Tell the person, and offer to set the basics now with Davnai's update_brand_kit "
+            "(colours, handle, and a voice written from two posts they like); a logo is added on Davnai's Brand Kit page. "
+            "Or carry on: the theme's own colours are used, and nothing is left broken.")
     say(
         f"Brand Kit saved for {pack.get('name') or 'this person'} in {BRAND_DIR}.",
         f"Captions: {caps.get('style_name', 'default')} ({caps.get('font_family', '')}), {caps.get('position', 'bottom')}. Colours: {colours}.",
@@ -432,6 +437,7 @@ FONT_SOURCES = {  # free Google Fonts (Open Font License), downloaded by setup o
 }
 THEMES = {
     "clean": {
+        "colours": ["#4338CA", "#0F172A"],  # used when the person has no brand colours
         "about": "Friendly and modern: rounded brand-colour boxes, soft shadows, gentle pops.",
         "caption_font": "Poppins-Bold.ttf", "title_font": "Poppins-ExtraBold.ttf",
         "caption": {"size": 0.072, "upper": False, "color": "#FFFFFF", "accent": "#FACC15", "outline": 0.05, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 4, "anim": "pop", "place": "bottom"},
@@ -439,6 +445,7 @@ THEMES = {
         "title_style": "pop", "sounds": {"transition": "swoosh", "motion": "pop"},
     },
     "bold": {
+        "colours": ["#111111", "#FFE14D"],  # used when the person has no brand colours
         "about": "Loud and punchy: big uppercase words, hard shadows, flashes and zooms. For hooks and fast talkers.",
         "caption_font": "Anton-Regular.ttf", "title_font": "Anton-Regular.ttf",
         "caption": {"size": 0.095, "upper": True, "color": "#FFFFFF", "accent": "#FFE14D", "outline": 0.12, "outlineColor": "#000000", "shadow": False, "box": None, "karaoke": "word", "words": 2, "anim": "bounce", "keyScale": 1.15, "place": "middle"},
@@ -446,6 +453,7 @@ THEMES = {
         "title_style": "words", "sounds": {"transition": "whoosh", "motion": "impact"},
     },
     "editorial": {
+        "colours": ["#1C1917", "#F5D0A9"],  # used when the person has no brand colours
         "about": "Calm and premium: serif titles, one quiet line of captions at the top, film-like colour.",
         "caption_font": "Poppins-Medium.ttf", "title_font": "DMSerifDisplay-Regular.ttf",
         "caption": {"size": 0.056, "upper": False, "color": "#FFFFFF", "accent": "#F5D0A9", "outline": 0.0, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 6, "anim": "type", "place": "top"},
@@ -453,6 +461,7 @@ THEMES = {
         "title_style": "glow", "sounds": {"transition": "swoosh", "motion": "click"},
     },
     "neon": {
+        "colours": ["#0B0B1A", "#22D3EE"],  # used when the person has no brand colours
         "about": "Night-time and techy: glowing outlines, dark panels, glitch cuts.",
         "caption_font": "Audiowide-Regular.ttf", "title_font": "Audiowide-Regular.ttf",
         "caption": {"size": 0.068, "upper": True, "color": "#FFFFFF", "accent": "#22D3EE", "outline": 0.05, "outlineColor": "#22D3EE", "shadow": False, "box": None, "karaoke": "word", "words": 3, "anim": "fade", "glow": True, "place": "bottom"},
@@ -460,6 +469,7 @@ THEMES = {
         "title_style": "glow", "sounds": {"transition": "glitch", "motion": "ding"},
     },
     "minimal": {
+        "colours": ["#18181B", "#3F3F46"],  # used when the person has no brand colours
         "about": "Quiet and simple: small captions at the top, plain cuts, no boxes.",
         "caption_font": "Poppins-Medium.ttf", "title_font": "Poppins-Bold.ttf",
         "caption": {"size": 0.05, "upper": False, "color": "#FFFFFF", "accent": "#FFFFFF", "outline": 0.03, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "none", "words": 7, "anim": "fade", "place": "top"},
@@ -467,6 +477,7 @@ THEMES = {
         "title_style": "slide", "sounds": {},
     },
     "playful": {
+        "colours": ["#FF5DA2", "#1B1B3A"],  # used when the person has no brand colours
         "about": "Bright and bouncy: rounded tilted stickers, big friendly letters, pops. For lifestyle, kids' and food content.",
         "caption_font": "Righteous-Regular.ttf", "title_font": "Bungee-Regular.ttf",
         "caption": {"size": 0.075, "upper": False, "color": "#FFFFFF", "accent": "#FF5DA2", "outline": 0.1, "outlineColor": "#1B1B3A", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "bounce", "keyScale": 1.2, "place": "bottom"},
@@ -474,6 +485,7 @@ THEMES = {
         "title_style": "bounce", "sounds": {"transition": "swoosh", "motion": "pop"},
     },
     "news": {
+        "colours": ["#B91C1C", "#111111"],  # used when the person has no brand colours
         "about": "Newsroom: solid bars, uppercase headlines, straight wipes. For updates, explainers and commentary.",
         "caption_font": "ArchivoBlack-Regular.ttf", "title_font": "BebasNeue-Regular.ttf",
         "caption": {"size": 0.06, "upper": False, "color": "#FFFFFF", "accent": "#FFFFFF", "outline": 0.0, "outlineColor": "#000000", "shadow": False, "box": {"color": "#111111", "alpha": 0.85}, "karaoke": "none", "words": 5, "anim": "fade", "place": "bottom"},
@@ -481,6 +493,7 @@ THEMES = {
         "title_style": "slide", "sounds": {"transition": "swoosh", "motion": "click"},
     },
     "tech": {
+        "colours": ["#0B0F14", "#34D399"],  # used when the person has no brand colours
         "about": "Developer and product: monospace type, typed-in captions, dark panels with a code feel.",
         "caption_font": "SpaceMono-Bold.ttf", "title_font": "SpaceMono-Bold.ttf",
         "caption": {"size": 0.055, "upper": False, "color": "#E5E7EB", "accent": "#34D399", "outline": 0.0, "outlineColor": "#000000", "shadow": False, "box": {"color": "#0B0F14", "alpha": 0.8}, "karaoke": "word", "words": 5, "anim": "type", "place": "bottom"},
@@ -488,6 +501,7 @@ THEMES = {
         "title_style": "typewriter", "sounds": {"transition": "glitch", "motion": "click"},
     },
     "retro": {
+        "colours": ["#C2410C", "#3B1F0E"],  # used when the person has no brand colours
         "about": "Retro: chunky letters, offset shadows, warm faded colour and film grain.",
         "caption_font": "Bungee-Regular.ttf", "title_font": "Bungee-Regular.ttf",
         "caption": {"size": 0.068, "upper": True, "color": "#FFF4D6", "accent": "#FF8A3D", "outline": 0.08, "outlineColor": "#3B1F0E", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "place": "bottom"},
@@ -495,6 +509,7 @@ THEMES = {
         "title_style": "bounce", "sounds": {"transition": "whoosh", "motion": "pop"},
     },
     "luxury": {
+        "colours": ["#0C0A08", "#E6C67A"],  # used when the person has no brand colours
         "about": "Luxury: elegant display serif, thin gold lines, slow dissolves. For fashion, property and beauty.",
         "caption_font": "Poppins-Medium.ttf", "title_font": "AbrilFatface-Regular.ttf",
         "caption": {"size": 0.058, "upper": False, "color": "#FFFFFF", "accent": "#E6C67A", "outline": 0.0, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 5, "anim": "fade", "place": "bottom"},
@@ -502,6 +517,7 @@ THEMES = {
         "title_style": "glow", "sounds": {"transition": "swoosh", "motion": "ding"},
     },
     "handwritten": {
+        "colours": ["#FDE047", "#111111"],  # used when the person has no brand colours
         "about": "Creator notebook: marker handwriting, tilted notes, casual pops.",
         "caption_font": "PermanentMarker-Regular.ttf", "title_font": "PermanentMarker-Regular.ttf",
         "caption": {"size": 0.07, "upper": False, "color": "#FFFFFF", "accent": "#FDE047", "outline": 0.08, "outlineColor": "#111111", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "place": "bottom"},
@@ -509,6 +525,7 @@ THEMES = {
         "title_style": "words", "sounds": {"transition": "swoosh", "motion": "pop"},
     },
     "podcast": {
+        "colours": ["#1E3A8A", "#0F172A"],  # used when the person has no brand colours
         "about": "Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out.",
         "caption_font": "Poppins-ExtraBold.ttf", "title_font": "Poppins-ExtraBold.ttf",
         "caption": {"size": 0.075, "upper": False, "color": "#FFFFFF", "accent": "#60A5FA", "outline": 0.08, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "keyScale": 1.15, "place": "middle"},
@@ -611,8 +628,8 @@ def themed(cfg: dict, brand: dict, theme: dict | None) -> tuple[dict, dict]:
     title_font = fonts.get(theme["title_font"])
     brand["theme"] = {"name": theme["name"], "title_style": theme["title_style"], "sounds": theme["sounds"],
                       "title_family": FONT_SOURCES[theme["title_font"]][0] if title_font else None, "title_path": str(title_font) if title_font else None}
-    if cfg.get("theme_colours"):
-        brand["colours"] = []
+    if cfg.get("theme_colours") or not [c for c in brand.get("colours") or [] if c.get("hex")]:
+        brand["colours"] = [{"name": "theme", "hex": hx} for hx in theme.get("colours", [])]  # no brand colours: the theme's own
     return cfg, brand
 
 
@@ -1318,7 +1335,7 @@ def brand_look(brand: dict) -> dict:
         kit_font = caps.get("font", {}).get("name") if isinstance(caps.get("font"), dict) else None
         font_path = BRAND_DIR / "fonts" / kit_font if kit_font and (BRAND_DIR / "fonts" / kit_font).exists() else None
     return {
-        "primary": colours[0] if colours else "#4F46E5",
+        "primary": colours[0] if colours else "#1F2937",  # neutral when there's no Brand Kit or theme colour
         "secondary": colours[1] if len(colours) > 1 else "#111827",
         "accent": look.get("accent") or "#FACC15",
         "text": "#FFFFFF",

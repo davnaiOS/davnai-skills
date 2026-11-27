@@ -224,7 +224,10 @@ def test_themes_apply_under_the_plan_and_take_the_brand_colours(monkeypatch, tmp
     assert kit["captions"]["look"]["accent"] == "#ABCDEF" and kit["captions"]["font_family"] == "Anton"
     assert davnai.brand_look(kit)["primary"] == "#123456" and davnai.brand_look(kit)["theme"] == "bold"
     _, own = davnai.themed({"theme_colours": True}, brand, davnai.theme_of({}, {"theme": "neon"}))
-    assert own["captions"]["look"]["accent"] == "#22D3EE" and own["colours"] == []
+    assert own["captions"]["look"]["accent"] == "#22D3EE" and [c["hex"] for c in own["colours"]] == davnai.THEMES["neon"]["colours"]
+    _, bare = davnai.themed({}, {}, davnai.theme_of({"theme": "luxury"}, {}))  # no Brand Kit: the theme's own colours, not Davnai's
+    assert davnai.brand_look(bare)["primary"] == davnai.THEMES["luxury"]["colours"][0]
+    assert davnai.brand_look({})["primary"] == "#1F2937"
     custom = davnai.theme_of({"theme": {"base": "clean", "caption": {"words": 2}, "title_font": "BebasNeue-Regular.ttf"}}, {})
     assert custom["caption"]["words"] == 2 and custom["title_font"] == "BebasNeue-Regular.ttf" and custom["caption"]["size"] == davnai.THEMES["clean"]["caption"]["size"]
     with pytest.raises(davnai.Problem):
@@ -333,3 +336,13 @@ def test_many_cuts_never_drift(tmp_path, monkeypatch):
     timing = json.loads((folder / "d_v1.timing.json").read_text())
     out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=duration", "-of", "csv=p=0", str(folder / "d_v1_preview.mp4")], capture_output=True, text=True).stdout
     assert abs(float(out) - timing["main"]) < 0.02
+
+
+def test_an_empty_brand_kit_is_named_and_offered(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    pack = {"version": 1, "name": None, "handle": None, "voice": None, "colours": [], "captions": {"style": "highlight", "style_name": "Highlight", "look": {}}, "logo": None, "intro": {"choice": "animated", "file": None, "note": "x"}, "outro": {"choice": "animated", "file": None, "note": "x"}}
+    monkeypatch.setattr(davnai, "http", lambda url, **k: (200, {}, json.dumps(pack).encode()))
+    assert davnai.main(["brand", "https://davnai.com/api/brand/pack?k=x"]) == 0
+    out = capsys.readouterr().out
+    assert "no colours, logo, handle, voice yet" in out and "update_brand_kit" in out
+    assert json.loads((tmp_path / "brand" / "brand.json").read_text())["colours"] == []
