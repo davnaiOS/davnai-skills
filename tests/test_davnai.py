@@ -399,3 +399,65 @@ def test_spotlight_darkens_the_background_not_the_person(tmp_path, monkeypatch):
     def pixel(x):
         return subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", "1.5", "-i", str(out), "-frames:v", "1", "-vf", f"crop=2:2:{x}:150", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout[0]
     assert pixel(88) > 150 and pixel(10) < 70  # the person stays lit, the room goes dark
+
+
+def test_sliced_words_land_on_the_beats():
+    assert davnai.slice_times(1.0, 3.0, 3, [1.5, 2.0, 2.5, 2.9]) == [1.0, 1.5, 2.0]
+    assert davnai.slice_times(1.0, 3.0, 3, [1.05, 1.5, 2.0]) == [1.05, 1.5, 2.0]
+    even = davnai.slice_times(0.0, 3.0, 3, [])
+    assert even == pytest.approx([0.0, 0.6, 1.2])
+
+
+def test_sliced_and_poster_titles_are_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    ass = tmp_path / "b.ass"
+    davnai.behind_ass(ass, 540, 960, [(0.0, 2.0, {"type": "behind", "text": "stop doing this", "slice": True, "_beats": [0.5, 1.0]}),
+                                     (3.0, 5.0, {"type": "poster", "text": "level up", "sub": "Episode 4"}),
+                                     (6.0, 7.0, {"type": "relight", "light": "neon"})], {}, 0.0)
+    events = [ln for ln in ass.read_text().splitlines() if ln.startswith("Dialogue")]
+    assert [e.split("}")[-1] for e in events] == ["STOP", "DOING", "THIS", "LEVEL\\NUP", "EPISODE 4"]
+    assert "\\move(" in events[0] and "0:00:00.50" in events[1]
+
+
+def test_poster_and_compare_build():
+    assert davnai.needs_cutout({"type": "poster"}) and not davnai.needs_cutout({"type": "compare"})
+    assert not davnai.needs_cutout({"type": "relight", "light": "golden_hour"})
+    graph, label = davnai.compare_graph("v", "raw", [(1.0, 2.0, {}), (4.0, 5.0, {})], 540, 960)
+    assert label == "cp1" and graph[0].startswith("[raw]split=2")
+    labels = davnai.compare_labels(1.0, 2.0, {"labels": ["Before", "After"]}, 540, 960)
+    assert [x[2] for x in labels] == ["Before", "After"] and labels[0][3] < labels[1][3]
+
+
+def test_feed_and_flythrough_graphics():
+    look = davnai.brand_look({})
+    html, js = davnai.motion_item(0, {"type": "feed", "caption": "hi", "_base": ("../base.mp4", 4.0)}, 0.5, 4.0, 540, 960, look, Path("."), Path("."))
+    assert 'data-media-start="4.500"' in html and "feed-col" in js
+    html, js = davnai.motion_item(1, {"type": "flythrough", "chapters": [{"text": "A", "line": 1}, {"text": "B", "line": 2}], "_stills": ["a.jpg", "b.jpg"]}, 0.0, 2.6, 540, 960, look, Path("."), Path("."))
+    assert html.count("fly-card") == 2 and "nth-child(2)" in js
+    with pytest.raises(davnai.Problem):
+        davnai.chapter_stills(Path("x.mp4"), {"chapters": [{"text": "A", "line": 9}]}, {"lines": {"1": [0, 1]}}, Path("."), 0)
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_poster_freezes_and_compare_shows_both_halves(tmp_path, monkeypatch):
+    monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    out = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=180x320:d=3:r=30", "-f", "lavfi", "-i", "sine=d=3", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)], check=True)
+
+    def fake_cutout(seg, person):
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(seg), "-vf", "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(between(X,W*0.4,W*0.6),255,0)'", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", str(person)], check=True)
+
+    monkeypatch.setattr(davnai, "cut_out_person", fake_cutout)
+    davnai.apply_behind(out, [(0.5, 2.5, {"type": "poster", "text": "WOW"})], {}, 180, 320, True, tmp_path, "v", 0.0)
+
+    def crop(t, x):
+        return subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", str(t), "-i", str(out), "-frames:v", "1", "-vf", f"crop=4:4:{x}:200", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    assert abs(crop(1.0, 88)[0] - crop(2.0, 88)[0]) < 12  # the person is frozen
+    assert max(crop(1.5, 20)[:3]) < 90  # the background is the flat (dark) brand colour
+
+
+def test_poster_title_fits_above_the_face():
+    size, single = davnai.poster_size(["LEVEL", "UP"], 540, 960, 48, (200, 300, 140, 140))
+    lines = 1 if single else 2
+    assert 48 + size * lines <= 300 + 140 * 0.25 + 1
+    assert davnai.poster_size(["GO"], 540, 960, 48)[1]

@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -988,6 +988,8 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
             raise Problem(f"Text \"{item.get('text', '')}\": its lines {rng} aren't in this video.")
         pos = {"top": "", "middle": "{\\an5}", "bottom": "{\\an2}"}.get(item.get("position", "top"), "")
         events.append(f"Dialogue: 2,{ass_time(window[0])},{ass_time(window[1] + 0.2)},Callout,,0,0,0,,{pos}{ANIM_TAGS['pop']}{ass_text(str(item.get('text', '')))}")
+    for a, b, text, x, y in cfg.get("_labels") or []:
+        events.append(f"Dialogue: 3,{ass_time(a)},{ass_time(b)},Callout,,0,0,0,,{{\\an8\\pos({x},{y})}}{ANIM_TAGS['pop']}{ass_text(text)}")
     if not events:
         return False
     header = "\n".join([
@@ -1232,6 +1234,10 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             auto_sounds += [(g[0]["out"], joins_sound) for g in timeline.groups[1:]]
 
     label = "vbase"
+    raw_label = None
+    if any(it.get("type") == "compare" for it in cfg.get("fx") or []):
+        graph.append("[vbase]split[vbase0][vraw]")
+        label, raw_label = "vbase0", "vraw"
     if cfg.get("split"):
         part, label = split_graph(label, cfg, w, h, fps, main_len, add_input, resolve)
         graph += part
@@ -1257,6 +1263,14 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         part, label = beat_pulse(label, beats_of(resolve(cfg["music"]), main_len), w, h, fps, float(cfg.get("beat_amount", 0.04)))
         graph += part
     behind = behind_windows(cfg, words, main_len)
+    if any(it.get("slice") for _, _, it in behind):  # sliced words land on the music's beats
+        song = beats_of(resolve(cfg["music"]), main_len) if cfg.get("music") else []
+        behind = [(a, b, {**it, "_beats": song}) if it.get("slice") else (a, b, it) for a, b, it in behind]
+    compares = [(*fx_window(it, words, main_len), it) for it in cfg.get("fx") or [] if it.get("type") == "compare"]
+    if compares:  # before / after: the cut picture, before looks and effects, on the left half
+        part, label = compare_graph(label, raw_label, compares, w, h)
+        graph += part
+        cfg = {**cfg, "_labels": [lab for a, b, it in compares for lab in compare_labels(a, b, it, w, h)]}
     for k, item in enumerate(cfg.get("broll") or []):  # cutaways, picture-in-picture and stickers over the main video
         rng = item.get("lines")
         window = line_window(words, int(rng[0]), int(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
@@ -1310,7 +1324,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         if place != preferred:
             cfg = {**cfg, "caption_position": place}
     ass = folder / f"{name}_v{version}.ass"
-    if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, _ in behind]):
+    if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, it in behind if it.get("type") in ("behind", "poster")]):
         fonts = folder / "fonts"
         fonts.mkdir(exist_ok=True)
         graph.append(f"[{label}]ass={ass.name}:fontsdir=fonts[vcap]")
@@ -1416,7 +1430,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
 
 MOTION_DIR = BRAND_DIR.parent / "motion"
 NO_TRACKING = {"HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1"}  # the person's renders stay private
-MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "block", "custom")
+MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "feed", "flythrough", "block", "custom")
 
 
 def hyperframes_cmd() -> list[str]:
@@ -1606,6 +1620,10 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
               f'.from("#{mid} .full-in > *",{{y:{round(6 * u)},autoAlpha:0,duration:0.4,stagger:0.12,ease:"back.out(1.8)"}},{t0 + 0.2:.3f})'
               f'.to("#{mid} .btn",{{scale:1.08,yoyo:true,repeat:{max(1, int(dur / 0.6))},duration:0.3}},{t0 + 1.0:.3f});')
         return html, js
+    if kind == "feed":
+        return motion_feed(mid, attrs, item, t0, dur, w, h, look)
+    if kind == "flythrough":
+        return motion_flythrough(mid, attrs, item, t0, dur, w, h)
     if kind == "block":
         return motion_block(mid, item, t0, dur, w, h, plan_dir, project)
     if kind == "custom":
@@ -1616,6 +1634,56 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
         html = f'<script>window.__davnaiCurrent="{mid}";</script><div {attrs} class="g custom">{src.read_text(encoding="utf-8")}</div>'
         return html, f'(window.__davnaiQueue["{mid}"]||[]).forEach(fn=>fn(tl,document.getElementById("{mid}"),{t0:.3f},{dur:.3f},window.BRAND));'
     raise Problem(f"Unknown motion graphic '{kind}'. Use: {', '.join(MOTION_TYPES)}.")
+
+
+def motion_feed(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int, h: int, look: dict) -> tuple[str, str]:
+    """The video plays inside a social post that scrolls up a phone feed into place, then the edit takes over again."""
+    u = min(w, h) / 100
+    src, media_at = item["_base"]
+    handle = str(item.get("handle") or look.get("handle") or "@you")
+    scale = 0.68 if h > w else 0.5
+    vw, vh = round(w * scale), round(h * scale)
+    filler = f'<div class="ph"><div class="ph-a"></div><div class="ph-b" style="height:{round(vh * 0.35)}px"></div></div>'
+    post = (f'<div class="post" style="width:{vw}px"><div class="post-top"><div class="ava">{esc(handle.lstrip("@")[:1].upper())}</div>'
+            f'<div class="who">{esc(handle)}</div><div class="follow">Follow</div></div>'
+            f'<div class="pv" style="width:{vw}px;height:{vh}px"><video data-start="{t0:.3f}" data-duration="{dur:.3f}" data-media-start="{media_at + t0:.3f}" src="{esc(src)}" muted playsinline></video></div>'
+            f'<div class="acts"><span class="heart">♥</span><span>💬</span><span>↗</span><span class="likes">{esc(item.get("likes", "12.4K"))}</span></div>'
+            f'<div class="cap"><b>{esc(handle)}</b> {esc(item.get("caption", ""))}</div></div>')
+    html = f'<div {attrs} class="g feed"><div class="feed-col">{filler}{post}{filler}</div></div>'
+    post_h = vh + 26 * u  # header, actions and caption around the video
+    land = round((h - post_h) / 2 - (9.5 * u + vh * 0.35))  # the post ends up centred, the posts around it peeking in
+    out_at = max(t0 + 1.4, t0 + dur - 0.45)
+    js = (f'tl.from("#{mid}",{{autoAlpha:0,duration:0.25}},{t0:.3f})'
+          f'.fromTo("#{mid} .feed-col",{{y:{round(h * 0.9)}}},{{y:{land},duration:0.9,ease:"power3.out"}},{t0:.3f})'
+          f'.fromTo("#{mid} .heart",{{scale:1}},{{scale:1.6,color:"#FF3B5C",yoyo:true,repeat:1,duration:0.18}},{t0 + 1.1:.3f})'
+          f'.to("#{mid} .feed-col",{{scale:{1 / scale:.3f},y:0,duration:0.45,ease:"power2.in"}},{out_at:.3f})'
+          f'.to("#{mid}",{{autoAlpha:0,duration:0.15}},{out_at + 0.32:.3f});')
+    return html, js
+
+
+def motion_flythrough(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int, h: int) -> tuple[str, str]:
+    """A 'coming up' opener: a card per chapter (a still from that moment and its title) flies past in 3D."""
+    stills = item.get("_stills") or []
+    chapters = item.get("chapters") or []
+    u = min(w, h) / 100
+    cw = round(w * (0.74 if h > w else 0.46))
+    ch = round(cw * 9 / 16) if w > h else round(cw * 1.15)
+    cards = "".join(f'<div class="fly-card" style="width:{cw}px;margin-left:-{cw // 2}px;margin-top:-{(ch + round(16 * u)) // 2}px">'
+                    f'<div class="fly-pic" style="height:{ch}px;background-image:url({esc(still)})"></div>'
+                    f'<div class="fly-t"><span class="fly-n">{i + 1:02d}</span> {esc(c.get("text", ""))}</div></div>'
+                    for i, (c, still) in enumerate(zip(chapters, stills)))
+    head = f'<div class="fly-head">{esc(item.get("title", "Coming up"))}</div>'
+    html = f'<div {attrs} class="g full fly">{head}<div class="fly-stage">{cards}</div></div>'
+    n = max(1, len(stills))
+    step = max(0.45, (dur - 0.5) / n)
+    js = f'tl.from("#{mid}",{{autoAlpha:0,duration:0.2}},{t0:.3f}).from("#{mid} .fly-head",{{y:-{round(6 * u)},autoAlpha:0,duration:0.3}},{t0:.3f});'
+    for i in range(n):
+        at = t0 + 0.25 + i * step
+        side = -1 if i % 2 else 1
+        js += (f'tl.fromTo("#{mid} .fly-card:nth-child({i + 1})",{{z:-1400,rotationY:{35 * side},x:{round(w * 0.25) * side},autoAlpha:0}},'
+               f'{{z:0,rotationY:0,x:0,autoAlpha:1,duration:{step * 0.55:.2f},ease:"power3.out"}},{at:.3f})')
+        js += f'.to("#{mid} .fly-card:nth-child({i + 1})",{{z:700,rotationY:{-20 * side},autoAlpha:0,duration:{step * 0.4:.2f},ease:"power2.in"}},{at + step * 0.6:.3f});'
+    return html, js + f'tl.to("#{mid}",{{autoAlpha:0,duration:0.2}},{t0 + dur - 0.2:.3f});'
 
 
 def motion_block(mid: str, item: dict, t0: float, dur: float, w: int, h: int, plan_dir: Path, project: Path) -> tuple[str, str]:
@@ -1696,7 +1764,46 @@ video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
 .handle{{font-size:{round(5 * u)}px;margin-top:{round(2 * u)}px;color:{a}}}
 .btn{{display:inline-block;margin-top:{round(4 * u)}px;background:{t};color:{p};border-radius:{round(5 * u)}px;padding:{round(1.6 * u)}px {round(6 * u)}px;font-size:{round(5 * u)}px}}
 .logo{{max-width:{round(30 * u)}px;max-height:{round(16 * u)}px;margin-bottom:{round(3 * u)}px}}
+.feed{{inset:0;background:#0E0E10;overflow:hidden}}
+.feed-col{{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;gap:{round(4 * u)}px;transform-origin:50% 50%}}
+.ph{{width:{round(w * 0.68)}px;opacity:.35;filter:blur(2px)}}
+.ph-a{{height:{round(4 * u)}px;width:40%;background:#3A3A40;border-radius:{round(2 * u)}px;margin-bottom:{round(1.5 * u)}px}}
+.ph-b{{background:#2A2A30;border-radius:{round(2 * u)}px}}
+.post{{background:#17171A;border-radius:{round(2.5 * u)}px;overflow:hidden;font-family:Inter,Arial,sans-serif;font-weight:600;color:#fff}}
+.post-top{{display:flex;align-items:center;gap:{round(2 * u)}px;padding:{round(2 * u)}px}}
+.ava{{width:{round(7 * u)}px;height:{round(7 * u)}px;border-radius:50%;background:{p};display:flex;align-items:center;justify-content:center;font-size:{round(3.8 * u)}px}}
+.who{{font-size:{round(3.6 * u)}px;flex:1}}
+.follow{{font-size:{round(3.2 * u)}px;color:{a}}}
+.pv{{position:relative;overflow:hidden;background:#000}}
+.pv video{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
+.acts{{display:flex;gap:{round(4 * u)}px;align-items:center;padding:{round(2 * u)}px;font-size:{round(5 * u)}px}}
+.heart{{display:inline-block}}
+.likes{{font-size:{round(3.4 * u)}px;margin-left:auto}}
+.cap{{padding:0 {round(2 * u)}px {round(2.5 * u)}px;font-size:{round(3.3 * u)}px;font-weight:400}}
+.fly{{perspective:{round(max(w, h) * 1.1)}px;background:radial-gradient(circle at 50% 40%,{p},#05050A)}}
+.fly-head{{position:absolute;top:{round(h * 0.08)}px;left:0;right:0;text-align:center;font-size:{round(6 * u)}px;color:{a};letter-spacing:.08em;text-transform:uppercase}}
+.fly-stage{{position:absolute;inset:0;transform-style:preserve-3d}}
+.fly-card{{position:absolute;left:50%;top:52%;transform-style:preserve-3d;opacity:0}}
+.fly-pic{{background-size:cover;background-position:center;border-radius:{round(2.5 * u)}px;box-shadow:0 {round(2 * u)}px {round(6 * u)}px rgba(0,0,0,.6);border:{max(2, round(0.5 * u))}px solid {t}}}
+.fly-t{{margin-top:{round(2.5 * u)}px;font-size:{round(5.5 * u)}px;text-align:center}}
+.fly-n{{color:{a}}}
 """ + THEME_CSS.get(look.get("theme") or "", "").format(s=round(1.2 * u), t=round(9.5 * u), h=max(2, round(0.4 * u)), g=round(2.5 * u), a=a, p=p)
+
+
+def chapter_stills(video: Path, item: dict, timing: dict, project: Path, k: int) -> list[str]:
+    """A still from the start of each chapter (by its transcript line), for the flythrough cards."""
+    chapters = item.get("chapters") or []
+    if not chapters:
+        raise Problem("A flythrough needs \"chapters\": [{\"text\": \"Setup\", \"line\": 4}, ...].")
+    names = []
+    for i, c in enumerate(chapters):
+        at = (timing["lines"].get(str(c.get("line"))) or [None])[0]
+        if at is None:
+            raise Problem(f"Flythrough chapter \"{c.get('text', '')}\": line {c.get('line')} isn't in this video.")
+        name = f"fly{k}_{i}.jpg"
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{at + 0.4:.3f}", "-i", str(video), "-frames:v", "1", "-q:v", "3", str(project / name)])
+        names.append(name)
+    return names
 
 
 def merge_windows(spans: list[tuple[float, float, int]]) -> list[tuple[float, float, list[int]]]:
@@ -1721,6 +1828,9 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
     total = probe(out)["seconds"]
     look = brand_look(brand)
     items = [keep_off_face(item, timing.get("face"), w, h) for item in cfg["motion"]]
+    for k, item in enumerate(items):  # a flythrough takes as long as its chapters need, unless told
+        if item.get("type") == "flythrough" and "seconds" not in item and not item.get("lines"):
+            items[k] = {**item, "seconds": round(0.95 * len(item.get("chapters") or []) + 0.7, 2)}
     spans = [(*item_window(item, timing, total), k) for k, item in enumerate(items)]
     base = out.with_name(out.stem + "_base" + out.suffix)
     out.replace(base)
@@ -1736,9 +1846,15 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
                 (project / "fonts").mkdir(exist_ok=True)
                 shutil.copy2(look["font_path"], project / "fonts" / Path(look["font_path"]).name)
             parts, anims = [], []
+            base_rel = os.path.relpath(base, project).replace("\\", "/")
             for k in ks:
                 ia, ib, _ = spans[k]
-                html, js = motion_item(k, items[k], ia - a, ib - ia, w, h, look, plan_dir, project)
+                item = items[k]
+                if item.get("type") == "feed":
+                    item = {**item, "_base": (base_rel, a)}
+                if item.get("type") == "flythrough":
+                    item = {**item, "_stills": chapter_stills(base, item, timing, project, k)}
+                html, js = motion_item(k, item, ia - a, ib - ia, w, h, look, plan_dir, project)
                 parts.append(html)
                 anims.append(js)
             base_rel = os.path.relpath(base, project).replace("\\", "/")
@@ -1931,7 +2047,26 @@ def relight_layers(k: int, item: dict, label: str, person: str, a: float, b: flo
 
 # ---------------------------------------------------------------- signature effects (timed by transcript lines)
 
-FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight")
+FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight", "poster", "compare")
+
+
+def compare_graph(label: str, raw: str, items: list[tuple[float, float, dict]], w: int, h: int) -> tuple[list[str], str]:
+    """Before / after: the left half shows the picture before looks and effects, with a divider line."""
+    graph = [f"[{raw}]split={len(items)}" + "".join(f"[cr{k}]" for k in range(len(items)))] if len(items) > 1 else [f"[{raw}]null[cr0]"]
+    bar = max(2, round(min(w, h) * 0.008))
+    for k, (a, b, _item) in enumerate(items):
+        graph.append(f"[cr{k}]crop={w // 2}:{h}:0:0[ch{k}]")
+        graph.append(f"[{label}][ch{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})'[cm{k}]")
+        graph.append(f"[cm{k}]drawbox=x={w // 2 - bar // 2}:y=0:w={bar}:h=ih:color=white:t=fill:enable='between(t,{a:.3f},{b:.3f})'[cp{k}]")
+        label = f"cp{k}"
+    return graph, label
+
+
+def compare_labels(a: float, b: float, item: dict, w: int, h: int) -> list[tuple[float, float, str, int, int]]:
+    """The two labels over a before / after (pure)."""
+    left, right = item.get("labels") or ["RAW", "EDIT"]
+    y = round(h * (0.08 if h > w else 0.06))
+    return [(a, b, str(left), w // 4, y), (a, b, str(right), w * 3 // 4, y)]
 
 
 def fx_window(item: dict, words: list[list], total: float) -> tuple[float, float]:
@@ -1989,8 +2124,8 @@ def fx_graph(label: str, cfg: dict, words: list[list], total: float, w: int, h: 
     graph = []
     for k, item in enumerate(cfg.get("fx") or []):
         kind = item.get("type")
-        if kind == "behind" or (kind == "relight" and item.get("light", "spotlight") != "golden_hour"):
-            continue  # needs the person cut out: done after the main render
+        if needs_cutout(item) or kind == "compare":
+            continue  # cut-out effects come after the main render; before/after is laid on later
         a, b = fx_window(item, words, total)
         if kind == "light_leak":
             colours = item.get("colours") or ["0xFF8A00", "0xFF2D55"]
@@ -2053,13 +2188,40 @@ def split_graph(label: str, cfg: dict, w: int, h: int, fps: float, total: float,
     return graph, "spv"
 
 
+def needs_cutout(item: dict) -> bool:
+    """Effects done after the main render, with the person cut out: words behind, poster, relighting (not golden hour)."""
+    kind = item.get("type")
+    return kind in ("behind", "poster") or (kind == "relight" and item.get("light", "spotlight") != "golden_hour")
+
+
 def behind_windows(cfg: dict, words: list[list], total: float) -> list[tuple[float, float, dict]]:
-    """Effects that need the person cut out: words behind them, and relighting (except golden hour)."""
-    return [(*fx_window(item, words, total), item) for item in cfg.get("fx") or []
-            if item.get("type") == "behind" or (item.get("type") == "relight" and item.get("light", "spotlight") != "golden_hour")]
+    """Effects that need the person cut out, with their windows."""
+    return [(*fx_window(item, words, total), item) for item in cfg.get("fx") or [] if needs_cutout(item)]
 
 
-def behind_ass(path: Path, w: int, h: int, items: list[tuple[float, float, dict]], brand: dict, offset: float) -> None:
+def slice_times(a: float, b: float, n: int, beats: list[float]) -> list[float]:
+    """When each word of a sliced title lands: on the music's beats when there are enough, else evenly (pure)."""
+    if n <= 0:
+        return []
+    near = [t for t in beats if a <= t < b - 0.15]
+    if near and near[0] - a > 0.12:
+        near = [a] + near
+    if len(near) >= n:
+        return near[:n]
+    step = (b - a) * 0.6 / max(1, n)
+    return [a + i * step for i in range(n)]
+
+
+def poster_size(words_: list[str], w: int, h: int, top: float, face=None) -> tuple[int, bool]:
+    """Font size for a poster title, and whether it goes on one line; it fits above the face (only the hair overlaps)."""
+    room = max(h * 0.16, face[1] + face[3] * 0.25 - top) if face else h * 0.3
+    one = min(round(min(w, h) * 0.42), round(w * 0.9 / max(1, len(" ".join(words_)) * 0.66)), round(room))
+    longest = max((len(x) for x in words_), default=1)
+    stacked = min(round(min(w, h) * 0.42), round(w * 0.9 / max(1, longest * 0.66)), round(room / max(1, len(words_))))
+    return (one, True) if one >= stacked * 0.75 else (stacked, False)
+
+
+def behind_ass(path: Path, w: int, h: int, items: list[tuple[float, float, dict]], brand: dict, offset: float, face=None) -> None:
     look = brand_look(brand)
     family = look["font"] if look.get("font_path") else "Arial"
     size = round(min(w, h) * 0.3)
@@ -2071,13 +2233,52 @@ def behind_ass(path: Path, w: int, h: int, items: list[tuple[float, float, dict]
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     for a, b, item in items:
-        if item.get("type", "behind") != "behind":
+        kind = item.get("type", "behind")
+        if kind not in ("behind", "poster"):
             continue
-        colour = ass_colour(item.get("color") or look["primary"])
-        y = round(h * float(item.get("y", 0.38)))
-        text = ass_text(str(item.get("text", "")).upper())
+        colour = ass_colour(item.get("color") or (look["text"] if kind == "poster" else look["primary"]))
+        y = round(h * float(item.get("y", 0.05 if kind == "poster" else 0.38)))
+        words_ = str(item.get("text", "")).upper().split()
+        if kind == "behind" and item.get("slice") and len(words_) > 1:
+            # Each word slams in on its own beat, from alternating sides, stacked like a cut-up poster.
+            fs = min(size, round(h * 0.55 / len(words_)))
+            gap = round(fs * 0.92)
+            for i, (word, t) in enumerate(zip(words_, slice_times(a, b, len(words_), item.get("_beats") or []))):
+                wfs = min(fs, round(w * 0.92 / max(1, len(word) * 0.62)))
+                wy = y - gap * (len(words_) - 1) // 2 + i * gap
+                x0 = w // 2 + (1 if i % 2 == 0 else -1) * round(w * 0.7)
+                tilt = (-4, 3, -2, 4)[i % 4]
+                tint = colour if i % 2 == 0 else ass_colour(item.get("color2") or look["accent"])  # every other word in the accent
+                lines.append(f"Dialogue: 0,{ass_time(t + offset)},{ass_time(b + offset)},Behind,,0,0,0,,{{\\move({x0},{wy},{w // 2},{wy},0,140)\\fs{wfs}\\frz{tilt}\\c{tint}}}{ass_text(word)}")
+            continue
+        text = ass_text(" ".join(words_))
+        if kind == "poster":  # as big as fits above the face: one line, or a word per line
+            pfs, single = poster_size(words_, w, h, y, None if "y" in item else face)
+            stacked = text if single else "\\N".join(ass_text(x) for x in words_)
+            lines.append(f"Dialogue: 0,{ass_time(a + offset)},{ass_time(b + offset)},Behind,,0,0,0,,{{\\an8\\pos({w // 2},{y})\\fs{pfs}\\fsp{-round(pfs * 0.03)}\\c{colour}\\fscx130\\fscy130\\t(0,180,\\fscx100\\fscy100)}}{stacked}")
+            if item.get("sub"):
+                lines.append(f"Dialogue: 1,{ass_time(a + offset + 0.2)},{ass_time(b + offset)},Behind,,0,0,0,,{{\\pos({w // 2},{round(h * 0.88)})\\fs{round(min(w, h) * 0.06)}\\c{colour}}}{ass_text(str(item['sub']).upper())}")
+            continue
         lines.append(f"Dialogue: 0,{ass_time(a + offset)},{ass_time(b + offset)},Behind,,0,0,0,,{{\\pos({w // 2},{y})\\c{colour}\\fscx60\\fscy60\\t(0,220,\\fscx100\\fscy100)}}{text}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def inputs_of(args: list[str]) -> list[str]:
+    """The input files in an ffmpeg argument list (each follows an -i)."""
+    return [args[i + 1] for i, a in enumerate(args[:-1]) if a == "-i"]
+
+
+def poster_background(path: Path, w: int, h: int, colour: str) -> None:
+    """A flat brand-colour background with halftone dots that grow towards the bottom."""
+    c = colour.lstrip("#")
+    cell = max(8, round(min(w, h) / 36))
+    dot = f"lt(hypot(mod(X,{cell})-{cell / 2},mod(Y,{cell})-{cell / 2}),{cell * 0.12}+{cell * 0.3}*Y/H)"
+    rgb = [int(c[i:i + 2], 16) for i in (0, 2, 4)] if len(c) == 6 else [0, 0, 0]
+    dark = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] < 110
+    shade = "{v}+(255-{v})*0.2" if dark else "{v}*0.8"  # lighter dots on dark colours, darker dots on light ones
+    ch = {n: f"if({dot},{shade.format(v=f'{n}(X,Y)')},{n}(X,Y))" for n in "rgb"}
+    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x{c}:s={w}x{h}:d=1", "-vf",
+         f"format=rgb24,geq=r='{ch['r']}':g='{ch['g']}':b='{ch['b']}'", "-frames:v", "1", str(path)])
 
 
 def cut_out_person(segment: Path, out: Path) -> None:
@@ -2096,14 +2297,19 @@ def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict,
     out.replace(base)
     try:
         people = []
-        for k, (a, b, _item) in enumerate(items):
+        for k, (a, b, item) in enumerate(items):
             seg = work / f"seg{k}.mp4"
-            run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{a + offset:.3f}", "-t", f"{b - a:.3f}", "-i", str(base), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", str(seg)])
+            if item.get("type") == "poster":  # the moment freezes: one frame, held
+                still = work / f"still{k}.png"
+                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{a + offset + 0.05:.3f}", "-i", str(base), "-frames:v", "1", str(still)])
+                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-framerate", "30", "-t", f"{b - a:.3f}", "-i", str(still), "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(seg)])
+            else:
+                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{a + offset:.3f}", "-t", f"{b - a:.3f}", "-i", str(base), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", str(seg)])
             person = work / f"person{k}.webm"
             cut_out_person(seg, person)
             people.append((a + offset, b + offset, person))
         ass = work / "behind.ass"
-        behind_ass(ass, w, h, items, brand, offset)
+        behind_ass(ass, w, h, items, brand, offset, face)
         look = brand_look(brand)
         fonts = work / "fonts"
         fonts.mkdir()
@@ -2117,13 +2323,26 @@ def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict,
             if item.get("type") == "relight":
                 part, label = relight_layers(k, item, label, f"{k + 1}:v", a, b, w, h, face, accent)
                 chain += part
-        if any(item.get("type", "behind") == "behind" for _, _, item in items):
+        for k, (a, b, person) in enumerate(people):  # posters: a flat halftone background in the brand colour
+            if items[k][2].get("type") == "poster":
+                bg = work / f"poster{k}.png"
+                poster_background(bg, w, h, items[k][2].get("background") or look["primary"])
+                inputs += ["-loop", "1", "-framerate", "30", "-t", f"{b - a:.3f}", "-i", str(bg)]
+                bi = len(inputs_of(inputs)) - 1
+                chain.append(f"[{bi}:v]format=yuv420p,fade=t=in:st=0:d=0.12:c=white,setpts=PTS-STARTPTS+{a:.3f}/TB[pb{k}]")
+                chain.append(f"[{label}][pb{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[pg{k}]")
+                label = f"pg{k}"
+        if any(item.get("type", "behind") in ("behind", "poster") for _, _, item in items):
             chain.append(f"[{label}]ass={ass.name}:fontsdir=fonts[bt]")
             label = "bt"
             for k, (a, b, person) in enumerate(people):
-                if items[k][2].get("type", "behind") == "behind":
+                if items[k][2].get("type", "behind") in ("behind", "poster"):
                     chain.append(f"[{label}][{k + 1}:v]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[bh{k}]")
                     label = f"bh{k}"
+                if items[k][2].get("type") == "poster":  # a paper border, like a printed poster
+                    edge = max(4, round(min(w, h) * 0.025))
+                    chain.append(f"[{label}]drawbox=x=0:y=0:w=iw:h=ih:color=white:t={edge}:enable='between(t,{a:.3f},{b:.3f})'[pf{k}]")
+                    label = f"pf{k}"
         quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
         run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", "-map", "0:a?", "-c:a", "copy", *quality, "-movflags", "+faststart", str(out)], cwd=work)
         base.unlink(missing_ok=True)

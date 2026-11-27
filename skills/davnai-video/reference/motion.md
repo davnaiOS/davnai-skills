@@ -16,6 +16,8 @@ Add `"motion": [ ... ]` to an output. Each graphic has a `type` and either `"lin
 | `quote` | `text`, `author` | Full-screen quote card in the brand colour. |
 | `chapter` | `number`, `text`, `seconds` (default 2.2) | Full-screen chapter card that wipes in and out. |
 | `end_screen` | `text`, `handle`, `button` | Logo, text, handle and a pulsing button (`"at": "end"`). |
+| `feed` | `caption`, `likes`, `handle` (Brand Kit handle by default) | Your video plays inside a social post that scrolls up a phone feed into place, gets a like, then zooms back to full screen. 3 to 5 seconds works best. |
+| `flythrough` | `chapters`: `[{ "text": "The setup", "line": 4 }, ...]`, `title` (default "Coming up") | A "coming up" opener: a card per chapter (a still from that line and its title) flies past in 3D. Use `"at": "start"`; it lasts about 1 s per chapter. Great for long videos. |
 | `block` | `name` (catalog) or `html` (your copy), `vars`, `fit` | A whole catalog scene (see below). |
 | `custom` | `html`: a file you write | Anything else (see below). |
 

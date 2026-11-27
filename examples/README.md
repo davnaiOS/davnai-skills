@@ -10,5 +10,6 @@ Copy one next to your video (in its `.davnai` folder), change the file names, an
 | [youtube-edit.json](youtube-edit.json) | A full YouTube edit: mistakes and dead air removed, intro and outro from the Brand Kit, chapter cards and a logo. |
 | [split-gameplay.json](split-gameplay.json) | Talking on top, gameplay (or any B-roll) underneath, captions on the middle line. |
 | [words-behind.json](words-behind.json) | Big words behind you on the key line, a beat pulse under music, and a warm light leak to open. |
+| [signature.json](signature.json) | The signature pieces: a chapter flythrough opener, words sliced on the beat, a poster moment, a before-and-after and a feed scroll. |
 
 Everything you can add: [library/](../library/). How plans work: [SKILL.md](../skills/davnai-video/SKILL.md#plan-format).

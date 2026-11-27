@@ -19,11 +19,13 @@ Everything the Davnai skill can put in a video. Each page says what it does, whe
 | [handwritten](themes/handwritten.md) | Creator notebook: marker handwriting, tilted notes, casual pops. | Permanent Marker / Permanent Marker | transition whip |
 | [podcast](themes/podcast.md) | Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out. | Poppins ExtraBold / Poppins ExtraBold | fill blur, clean_audio True |
 
-## Signature effects (11)
+## Signature effects (13)
 
 | effect | what it does | plan |
 |---|---|---|
 | [Big words behind the person](effects/behind.md) | The person is cut out and put back in front of huge words, so the words sit behind them. | `"type": "behind"` |
+| [Poster moment](effects/poster.md) | The picture freezes and turns into a poster: a halftone background in your brand colour, a huge title behind the person and a paper border, while the voice carries on. | `"type": "poster"` |
+| [Before and after](effects/compare.md) | The left half shows the picture before looks and effects, the right half the finished edit, with labels and a divider. | `"type": "compare"` |
 | [Relight the person](effects/relight.md) | Changes the light around the speaker: spotlight, low_key, silhouette, neon, rim, under_light or golden_hour. The person is cut out so the light hits the room and the person separately (golden_hour needs no cut-out). | `"type": "relight"` |
 | [Camera shake](effects/shake.md) | A short handheld shake. | `"type": "shake"` |
 | [Flash](effects/flash.md) | A quick bright flash (0.15 s). | `"type": "flash"` |
@@ -35,7 +37,7 @@ Everything the Davnai skill can put in a video. Each page says what it does, whe
 | [Film grain](effects/grain.md) | Fine moving grain. | `"type": "grain"` |
 | [Light leak](effects/light_leak.md) | Warm light washes across the picture. | `"type": "light_leak"` |
 
-## Motion graphics (12)
+## Motion graphics (14)
 
 In the brand's colours and fonts, made with HyperFrames (`setup --motion`).
 
@@ -49,6 +51,8 @@ In the brand's colours and fonts, made with HyperFrames (`setup --motion`).
 | [List](motion/list.md) | Points tick in one by one. |
 | [Chart](motion/chart.md) | Bars grow in. |
 | [Quote card](motion/quote.md) | A full-screen quote in the brand colour. |
+| [Feed scroll](motion/feed.md) | Your video plays inside a social post that scrolls up a phone feed into place (with your handle, a like and a caption), then zooms back to full screen. |
+| [Chapter flythrough](motion/flythrough.md) | A 'coming up' opener: a card per chapter, with a still from that moment and its title, flies past in 3D. |
 | [Chapter card](motion/chapter.md) | A full-screen chapter card wipes in and out. |
 | [End screen](motion/end_screen.md) | Logo, text, handle and a pulsing button. |
 | [Catalog scene](motion/block.md) | Any of HyperFrames' ready-made scenes (follow buttons, phone screens, charts). |

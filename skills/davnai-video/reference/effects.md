@@ -42,8 +42,10 @@ Add `"fx": [ ... ]` to an output. Each effect has a `type` and `"lines": [first,
 
 | type | what it does |
 |---|---|
-| `behind` | **Big words behind the person**: `{ "type": "behind", "text": "MONEY", "lines": [12, 13] }`. The person is cut out (on this computer, with HyperFrames; needs `setup --motion`) and put back in front of the words. Captions pause during it. Optional `"y"` (0 to 1, height of the words, default 0.38), `"color"`. Best on a clear shot of one person. |
+| `behind` | **Big words behind the person**: `{ "type": "behind", "text": "MONEY", "lines": [12, 13] }`. The person is cut out (on this computer, with HyperFrames; needs `setup --motion`) and put back in front of the words. Captions pause during it. Optional `"y"` (0 to 1, height of the words, default 0.38), `"color"`. Add `"slice": true` and each word slams in on its own line, from alternating sides, on the music's beats (evenly without music); every other word uses the accent (or `"color2"`). Best on a clear shot of one person. |
 | `relight` | **Relight the person**: `{ "type": "relight", "light": "neon", "lines": [4, 6] }`. Lights: `spotlight` (room darkens, light on the face), `low_key` (moody, dark room), `silhouette` (dark figure on a bright background), `neon` (coloured glow behind the person; brand accent or `"color"`), `rim` (thin bright edge), `under_light` (warm light from below), `golden_hour` (warm sunset grade, no cut-out needed). Uses the same cut-out as `behind`. |
+| `poster` | **Poster moment**: `{ "type": "poster", "text": "LEVEL UP", "sub": "Episode 4", "lines": [9, 9] }`. The picture freezes on that moment and becomes a poster: halftone background in the brand colour (or `"background"`), the title huge behind the person, a paper border. The voice keeps going. Uses the cut-out. |
+| `compare` | **Before and after**: `{ "type": "compare", "lines": [3, 4] }`. Left half: the picture before looks and effects; right half: the finished edit; a divider and labels (`"labels": ["RAW", "EDIT"]`). Pair it with a look or effect on the same lines so the difference shows. |
 | `shake` | camera shake for impact |
 | `flash` | a quick bright flash (0.15 s) on a punchline or a cut |
 | `rgb` | colour-split (chromatic) look |

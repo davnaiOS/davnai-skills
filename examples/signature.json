@@ -1,0 +1,25 @@
+{
+  "_about": "Signature pieces: a chapter flythrough opener, words behind you sliced on the beat, a poster moment, a before-and-after and a feed scroll. Line numbers are examples: pick yours from the transcript.",
+  "source": "interview.mp4",
+  "outputs": [
+    {
+      "name": "signature",
+      "aspect": "9:16",
+      "theme": "bold",
+      "keep": [[1, 24]],
+      "tighten": true,
+      "captions": true,
+      "music": "music/beat.mp3",
+      "motion": [
+        { "type": "flythrough", "at": "start", "chapters": [{ "text": "The mistake", "line": 4 }, { "text": "The fix", "line": 12 }, { "text": "The result", "line": 20 }] },
+        { "type": "feed", "caption": "this changed everything", "lines": [21, 22] }
+      ],
+      "fx": [
+        { "type": "behind", "text": "STOP DOING THIS", "slice": true, "lines": [5, 6] },
+        { "type": "poster", "text": "THE FIX", "sub": "Step 2", "lines": [12, 12] },
+        { "type": "compare", "labels": ["RAW", "EDIT"], "lines": [17, 18] }
+      ],
+      "look": "punchy"
+    }
+  ]
+}

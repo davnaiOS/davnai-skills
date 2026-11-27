@@ -13,7 +13,9 @@ import davnai  # noqa: E402
 LIB = ROOT / "library"
 
 EFFECTS = {
-    "behind": ("Big words behind the person", "The person is cut out and put back in front of huge words, so the words sit behind them.", "Hooks, a key word, a reveal.", '{ "type": "behind", "text": "MONEY", "lines": [12, 13] }'),
+    "behind": ("Big words behind the person", "The person is cut out and put back in front of huge words, so the words sit behind them.", "Hooks, a key word, a reveal. Add \"slice\": true and each word slams in on its own beat of the music.", '{ "type": "behind", "text": "STOP DOING THIS", "slice": true, "lines": [12, 13] }'),
+    "poster": ("Poster moment", "The picture freezes and turns into a poster: a halftone background in your brand colour, a huge title behind the person and a paper border, while the voice carries on.", "The big line, a chapter opener, a thumbnail-worthy moment.", '{ "type": "poster", "text": "LEVEL UP", "sub": "Episode 4", "lines": [9, 9] }'),
+    "compare": ("Before and after", "The left half shows the picture before looks and effects, the right half the finished edit, with labels and a divider.", "Showing off the edit, tutorials, transformations.", '{ "type": "compare", "labels": ["RAW", "EDIT"], "lines": [3, 4] }'),
     "relight": ("Relight the person", "Changes the light around the speaker: spotlight, low_key, silhouette, neon, rim, under_light or golden_hour. The person is cut out so the light hits the room and the person separately (golden_hour needs no cut-out).", "Hooks, dramatic lines, a mood change, music videos.", '{ "type": "relight", "light": "neon", "lines": [4, 6] }'),
     "shake": ("Camera shake", "A short handheld shake.", "Impact moments, punchlines, surprises.", '{ "type": "shake", "lines": [8, 8] }'),
     "flash": ("Flash", "A quick bright flash (0.15 s).", "A cut on the beat, a reveal.", '{ "type": "flash", "lines": [5, 5] }'),
@@ -34,6 +36,8 @@ MOTION = {
     "list": ("List", "Points tick in one by one.", '{ "type": "list", "title": "3 steps", "items": ["Plan", "Film", "Post"], "lines": [14, 18] }'),
     "chart": ("Chart", "Bars grow in.", '{ "type": "chart", "title": "Views", "bars": [{ "label": "Jan", "value": 10 }, { "label": "Feb", "value": 40 }], "lines": [20, 21] }'),
     "quote": ("Quote card", "A full-screen quote in the brand colour.", '{ "type": "quote", "text": "Done beats perfect.", "author": "Ada", "lines": [11, 11] }'),
+    "feed": ("Feed scroll", "Your video plays inside a social post that scrolls up a phone feed into place (with your handle, a like and a caption), then zooms back to full screen.", '{ "type": "feed", "caption": "this changed everything", "likes": "12.4K", "lines": [5, 6] }'),
+    "flythrough": ("Chapter flythrough", "A 'coming up' opener: a card per chapter, with a still from that moment and its title, flies past in 3D.", '{ "type": "flythrough", "at": "start", "chapters": [{ "text": "The setup", "line": 4 }, { "text": "The twist", "line": 18 }] }'),
     "chapter": ("Chapter card", "A full-screen chapter card wipes in and out.", '{ "type": "chapter", "number": 2, "text": "Filming", "lines": [15, 15] }'),
     "end_screen": ("End screen", "Logo, text, handle and a pulsing button.", '{ "type": "end_screen", "text": "Follow for more", "at": "end", "seconds": 3 }'),
     "block": ("Catalog scene", "Any of HyperFrames' ready-made scenes (follow buttons, phone screens, charts).", '{ "type": "block", "name": "tiktok-follow", "at": "end", "seconds": 3 }'),
