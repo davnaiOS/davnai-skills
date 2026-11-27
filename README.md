@@ -11,7 +11,8 @@ Skills that teach your AI (Claude, ChatGPT and Codex, Gemini, Cursor and other a
 - **Your brand everywhere:** captions in your Brand Kit style, your logo, your own intro and outro.
 - **Effects:** animated captions, hook titles, text callouts, auto zoom, transitions, B-roll and picture-in-picture, blurred backgrounds, colour looks, progress bars, sound effects, music, end cards.
 - **Motion graphics** with [HyperFrames](https://github.com/heygen-com/hyperframes): animated titles, lower thirds, callouts, counters, lists, charts, quote and chapter cards, end screens, any of HyperFrames' 448 catalog pieces, or anything your AI writes in HTML, all in your brand.
-- **Signature effects:** big words behind you (the person is cut out on your computer), shake, flash, colour split, glitch, VHS, grain, light leaks, split screen (gameplay or B-roll underneath) and zoom pulses on the music's beat.
+- **Signature effects:** big words behind you (the person is cut out on your computer), relighting (spotlight, neon glow, silhouette, rim light, golden hour), shake, flash, colour split, glitch, VHS, grain, light leaks, split screen (gameplay or B-roll underneath) and zoom pulses on the music's beat.
+- **Face-aware:** the speaker stays in frame when a wide video becomes vertical, and captions and titles move off their face.
 - **Storyboard first:** a scene-by-scene plan and a picture page to approve before anything is rendered.
 - **Free voice-overs** made on your computer for faceless videos, and built-in sound effects (whoosh, pop, impact, riser...).
 - **Quality checks** on every render: black or frozen picture, loudness for social apps, long silences, captions covering a face.

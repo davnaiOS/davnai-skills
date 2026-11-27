@@ -43,6 +43,7 @@ Add `"fx": [ ... ]` to an output. Each effect has a `type` and `"lines": [first,
 | type | what it does |
 |---|---|
 | `behind` | **Big words behind the person**: `{ "type": "behind", "text": "MONEY", "lines": [12, 13] }`. The person is cut out (on this computer, with HyperFrames; needs `setup --motion`) and put back in front of the words. Captions pause during it. Optional `"y"` (0 to 1, height of the words, default 0.38), `"color"`. Best on a clear shot of one person. |
+| `relight` | **Relight the person**: `{ "type": "relight", "light": "neon", "lines": [4, 6] }`. Lights: `spotlight` (room darkens, light on the face), `low_key` (moody, dark room), `silhouette` (dark figure on a bright background), `neon` (coloured glow behind the person; brand accent or `"color"`), `rim` (thin bright edge), `under_light` (warm light from below), `golden_hour` (warm sunset grade, no cut-out needed). Uses the same cut-out as `behind`. |
 | `shake` | camera shake for impact |
 | `flash` | a quick bright flash (0.15 s) on a punchline or a cut |
 | `rgb` | colour-split (chromatic) look |
@@ -52,6 +53,16 @@ Add `"fx": [ ... ]` to an output. Each effect has a `type` and `"lines": [first,
 | `vhs` | old tape look: faded colour, scan lines, noise |
 | `grain` | film grain (use `"all": true` for the whole video) |
 | `light_leak` | warm light washing across; `"colours": ["0xFF8A00", "0xFF2D55"]` to change |
+
+## Face-aware placement
+
+On by default for recordings (needs `opencv-python-headless`, installed by `setup`). The script finds the speaker's face and:
+- keeps it in a tall crop when a wide video becomes 9:16 (unless the plan sets `focus_x` or `"fill": "blur"`);
+- moves captions to the nearest place that doesn't cover the face (unless the plan sets `caption_position`);
+- moves titles, counters, lists, charts and lower thirds off the face (unless the graphic has its own `position`);
+- puts relight glows around the face.
+
+The quality check reports "captions clear of faces". Turn it off with `"face_aware": false` on the output.
 
 ## Split screen
 

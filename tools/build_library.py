@@ -14,6 +14,7 @@ LIB = ROOT / "library"
 
 EFFECTS = {
     "behind": ("Big words behind the person", "The person is cut out and put back in front of huge words, so the words sit behind them.", "Hooks, a key word, a reveal.", '{ "type": "behind", "text": "MONEY", "lines": [12, 13] }'),
+    "relight": ("Relight the person", "Changes the light around the speaker: spotlight, low_key, silhouette, neon, rim, under_light or golden_hour. The person is cut out so the light hits the room and the person separately (golden_hour needs no cut-out).", "Hooks, dramatic lines, a mood change, music videos.", '{ "type": "relight", "light": "neon", "lines": [4, 6] }'),
     "shake": ("Camera shake", "A short handheld shake.", "Impact moments, punchlines, surprises.", '{ "type": "shake", "lines": [8, 8] }'),
     "flash": ("Flash", "A quick bright flash (0.15 s).", "A cut on the beat, a reveal.", '{ "type": "flash", "lines": [5, 5] }'),
     "rgb": ("Colour split", "Red and blue separate for a chromatic look.", "Energy, tech, music.", '{ "type": "rgb", "lines": [3, 4] }'),

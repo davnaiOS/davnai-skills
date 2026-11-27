@@ -64,7 +64,7 @@ Every render ends with checks: black or frozen picture, loudness (social apps li
 - `music`: a file of theirs, with `music_volume` (default 0.12).
 - Faceless videos use `voice` and `scenes` instead of `keep` (see `reference/faceless.md`).
 - **Motion graphics** (animated titles, lower thirds, callouts, emoji, counters, lists, charts, quote and chapter cards, end screens, or your own HyperFrames HTML): `"motion": [...]`, see `reference/motion.md`. Needs `setup --motion`.
-- **Signature effects** (`"fx"`: words behind the person, shake, flash, colour split, glitch, blur, black and white, VHS, grain, light leak), **split screen** (`"split"`) and **beat sync** (`"beat_pulse"`, `"beat_cuts"`): see `reference/effects.md`.
+- **Signature effects** (`"fx"`: words behind the person, relighting (spotlight, neon, silhouette and more), shake, flash, colour split, glitch, blur, black and white, VHS, grain, light leak), **split screen** (`"split"`) and **beat sync** (`"beat_pulse"`, `"beat_cuts"`): see `reference/effects.md`. Captions and graphics keep off the speaker's face on their own (`"face_aware": false` turns it off).
 - **Effects** (animated captions, hook titles, text callouts, auto zoom, transitions, B-roll, picture-in-picture, blurred background, colour looks, progress bar, sound effects, speed, cleaner voice, end card): `reference/effects.md`.
 
 ## Long videos

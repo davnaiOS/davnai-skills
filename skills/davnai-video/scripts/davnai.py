@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -1103,6 +1103,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
 
     aspect = cfg.get("aspect", "9:16")
     focus_x = min(1.0, max(0.0, float(cfg.get("focus_x", 0.5))))
+    face_out = None
     fill = cfg.get("fill", "crop")
     speed = min(2.0, max(0.5, float(cfg.get("speed", 1.0))))
     transition = cfg.get("transition")
@@ -1183,6 +1184,13 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             p["frames"] = max(1, round((p["e"] - p["s"]) / speed * fps))
             p["e"] = p["s"] + p["frames"] / fps * speed
         timeline = Timeline(pieces, transition, speed)
+        if cfg.get("face_aware", True):  # find the speaker: keep them in a tall crop, and keep text off their face
+            faces = detect_faces(source, [(p["s"] + p["e"]) / 2 for p in pieces[:: max(1, len(pieces) // 10)]])
+            better = auto_focus(cfg, faces, info["width"], info["height"], w, h)
+            if better is not None:
+                focus_x = better
+            box = median_box(faces)
+            face_out = face_to_output(box, info["width"], info["height"], w, h, focus_x, fill) if box else None
         si = add_input("-i", str(source))
         tempo = f",atempo={speed:g}" if abs(speed - 1) > 0.001 else ""
         for k, p in enumerate(pieces):
@@ -1294,6 +1302,13 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         if frame_filter:
             graph.append(f"[{label}]{frame_filter}[vframe]")
             label = "vframe"
+    if face_out and not cfg.get("caption_position"):  # captions move off the face (the plan can still choose)
+        caps_ = brand.get("captions") or {}
+        look_ = {**DEFAULT_STYLE, **(caps_.get("look") or {})}
+        preferred = caps_.get("position") or look_.get("place") or "bottom"
+        place = clear_place(face_out, w, h, look_, caps_.get("margins") or DEFAULT_MARGINS, preferred)
+        if place != preferred:
+            cfg = {**cfg, "caption_position": place}
     ass = folder / f"{name}_v{version}.ass"
     if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, _ in behind]):
         fonts = folder / "fonts"
@@ -1387,10 +1402,10 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
     for wd in words:
         win = windows.setdefault(int(wd[3]), [wd[1], wd[2]])
         win[0], win[1] = min(win[0], wd[1]), max(win[1], wd[2])
-    timing = {"offset": intro_len, "main": main_len, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
+    timing = {"offset": intro_len, "main": main_len, "face": [round(v, 1) for v in face_out] if face_out else None, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
     (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
     if behind:
-        apply_behind(out, behind, brand, w, h, final, folder, f"{name}_v{version}", intro_len)
+        apply_behind(out, behind, brand, w, h, final, folder, f"{name}_v{version}", intro_len, face_out)
     if cfg.get("motion"):
         apply_motion(out, cfg, brand, timing, w, h, fps, final, folder, f"{name}_v{version}", plan_dir)
     checks = quality_checks(out, cfg, brand) if (final or main_len <= 180) and cfg.get("checks", True) else []
@@ -1438,6 +1453,27 @@ def brand_look(brand: dict) -> dict:
         "title_style": theme.get("title_style") or "pop",
         "sound": (theme.get("sounds") or {}).get("motion"),
     }
+
+
+SPOT_TOPS = {"top": (0.12, 0.08), "upper": (0.24, 0.24), "middle": (0.42, 0.42), "lower": (0.56, 0.66), "bottom": (0.62, 0.78)}
+DEFAULT_SPOT = {"title": "top", "counter": "upper", "list": "upper", "chart": "upper"}
+
+
+def keep_off_face(item: dict, face, w: int, h: int) -> dict:
+    """A graphic without a chosen position moves to the nearest place that doesn't cover the face (pure)."""
+    kind = item.get("type")
+    if not face or item.get("position") or kind not in (*DEFAULT_SPOT, "lower_third"):
+        return item
+    tall = h > w
+    default = DEFAULT_SPOT.get(kind) or ("upper" if tall else "lower")
+    height = {"title": 0.16, "lower_third": 0.12}.get(kind, 0.3) * h
+    top, bottom = face[1] - face[3] * 0.15, face[1] + face[3] * 1.15
+    order = [default] + [p for p in ("top", "upper", "lower", "bottom", "middle") if p != default]
+    for place in order:
+        a = SPOT_TOPS[place][0 if tall else 1] * h
+        if a + height < top or a > bottom:
+            return item if place == default else {**item, "position": place}
+    return item
 
 
 def item_window(item: dict, timing: dict, total: float) -> tuple[float, float]:
@@ -1684,7 +1720,7 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
         raise Problem("GSAP is missing. Run: python davnai.py setup --motion")
     total = probe(out)["seconds"]
     look = brand_look(brand)
-    items = cfg["motion"]
+    items = [keep_off_face(item, timing.get("face"), w, h) for item in cfg["motion"]]
     spans = [(*item_window(item, timing, total), k) for k, item in enumerate(items)]
     base = out.with_name(out.stem + "_base" + out.suffix)
     out.replace(base)
@@ -1753,9 +1789,149 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
         raise
 
 
+# ---------------------------------------------------------------- faces: framing and keeping text off them
+
+LIGHTS = ("spotlight", "low_key", "silhouette", "neon", "rim", "under_light", "golden_hour")
+
+
+def detect_faces(path: Path, times: list[float]) -> list[tuple[float, float, float, float]]:
+    """Faces (x, y, w, h in the source's pixels) found at these times; [] when OpenCV isn't installed."""
+    try:
+        import cv2
+    except ImportError:
+        return []
+    finder = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    video = cv2.VideoCapture(str(path))
+    found = []
+    for t in times[:12]:
+        video.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t) * 1000)
+        ok, frame = video.read()
+        if not ok:
+            continue
+        grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        side = min(grey.shape[:2])
+        faces = finder.detectMultiScale(grey, 1.15, 6, minSize=(int(side * 0.08),) * 2)
+        if len(faces):
+            x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])  # the biggest face: the speaker
+            found.append((float(x), float(y), float(fw), float(fh)))
+    video.release()
+    return found
+
+
+def median_box(boxes: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float] | None:
+    if not boxes:
+        return None
+    mid = lambda i: sorted(b[i] for b in boxes)[len(boxes) // 2]  # noqa: E731
+    return (mid(0), mid(1), mid(2), mid(3))
+
+
+def face_to_output(box, src_w: int, src_h: int, w: int, h: int, focus_x: float, fill: str):
+    """Where a source face lands in the output frame (the same crop or fit as shape())."""
+    x, y, fw, fh = box
+    if fill == "blur" and abs(src_w / src_h - w / h) > 0.02:
+        s = min(w / src_w, h / src_h)
+        ox, oy = (w - src_w * s) / 2, (h - src_h * s) / 2
+        return (ox + x * s, oy + y * s, fw * s, fh * s)
+    src_ar, ar = src_w / src_h, w / h
+    x0 = y0 = 0.0
+    cw, ch = src_w, src_h
+    if src_ar > ar + 0.01:
+        cw = src_h * ar
+        x0 = (src_w - cw) * focus_x
+    elif src_ar < ar - 0.01:
+        ch = src_w / ar
+        y0 = (src_h - ch) / 2
+    s = w / cw
+    return ((x - x0) * s, (y - y0) * s, fw * s, fh * s)
+
+
+def caption_band(place: str, w: int, h: int, look: dict, margins: dict) -> tuple[float, float]:
+    size = float(look.get("size", 0.075)) * min(w, h)
+    m = margins["tall" if h > w else "wide"]
+    if place == "top":
+        return (m["top"] * h, m["top"] * h + size * 2.6)
+    if place == "middle":
+        return (h / 2 - size * 1.3, h / 2 + size * 1.3)
+    return (h - m["bottom"] * h - size * 2.6, h - m["bottom"] * h)
+
+
+def clear_place(face, w: int, h: int, look: dict, margins: dict, preferred: str) -> str:
+    """The caption position nearest the preferred one that doesn't cover the face (pure)."""
+    if not face:
+        return preferred
+    top, bottom = face[1] - face[3] * 0.15, face[1] + face[3] * 1.15  # a little hair and chin
+    for place in [preferred] + [p for p in ("bottom", "top", "middle") if p != preferred]:
+        a, b = caption_band(place, w, h, look, margins)
+        if b < top or a > bottom:
+            return place
+    return preferred
+
+
+def auto_focus(cfg: dict, faces: list, src_w: int, src_h: int, w: int, h: int) -> float | None:
+    """When a wide video becomes tall and the plan didn't set focus_x, keep the speaker's face in the frame."""
+    face = median_box(faces)
+    if face is None or "focus_x" in cfg or src_w / src_h <= w / h + 0.01 or cfg.get("fill") == "blur":
+        return None
+    cw = src_h * (w / h)
+    centre = face[0] + face[2] / 2
+    return min(1.0, max(0.0, (centre - cw / 2) / max(1.0, src_w - cw)))
+
+
+# ---------------------------------------------------------------- relighting the person (needs the cut-out)
+
+
+def relight_layers(k: int, item: dict, label: str, person: str, a: float, b: float, w: int, h: int, face, accent: str) -> tuple[list[str], str]:
+    """Filters that relight one window: the background changes, light or a glow is added, the person goes back on top."""
+    light = item.get("light", "spotlight")
+    if light not in LIGHTS:
+        raise Problem(f"Unknown light '{light}'. Use: {', '.join(LIGHTS)}.")
+    u = max(2, round(min(w, h) / 160))
+    fx_, fy_ = (face[0] + face[2] / 2, face[1] + face[3] / 2) if face else (w / 2, h * 0.38)
+    en = f"enable='between(t,{a:.3f},{b:.3f})'"
+    bg = {
+        "spotlight": f"eq=brightness=-0.28:saturation=0.75,vignette=angle=PI/3.2:x0={fx_:.0f}:y0={fy_:.0f}",
+        "low_key": "eq=brightness=-0.5:saturation=0.6",
+        "silhouette": "eq=brightness=0.14:contrast=1.15:saturation=1.2",
+        "neon": "eq=brightness=-0.42:saturation=0.8",
+        "rim": "eq=brightness=-0.22:saturation=0.9",
+        "under_light": "eq=brightness=-0.35:saturation=0.85",
+    }[light]
+    body = {
+        "spotlight": "eq=brightness=0.05:contrast=1.08",
+        "low_key": "eq=contrast=1.22:brightness=-0.02",
+        "silhouette": "lutrgb=r=12:g=12:b=16",
+        "neon": "eq=brightness=-0.06:saturation=1.2",
+        "rim": "null",
+        "under_light": "eq=brightness=-0.05",
+    }[light]
+    colour = "0x" + (item.get("color") or {"neon": accent if accent.upper() not in ("#FFFFFF", "#FFF") else "#FF2BD6", "rim": "#FFF4E0", "under_light": "#FF7A1A"}.get(light, "#FFFFFF")).lstrip("#")
+    g = [f"[{label}]split[r{k}a][r{k}b]", f"[r{k}b]{bg}[r{k}bg]", f"[r{k}a][r{k}bg]overlay=0:0:{en}[r{k}l]", f"[{person}]format=rgba,split[r{k}p][r{k}m]"]
+    out = f"r{k}l"
+    if light in ("neon", "rim"):  # a halo behind the person
+        blur = {"neon": 7 * u, "rim": 3 * u}[light]
+        shape = f",boxblur={blur}:2"
+        strength = float(item.get("strength", 1.0)) * {"neon": 1.0, "rim": 0.85}[light]
+        g += [f"[r{k}m]alphaextract{shape}[r{k}mask]",
+              f"color=c={colour}:s={w}x{h}:d={b - a:.3f}:r=30,format=rgba,setpts=PTS-STARTPTS+{a:.3f}/TB[r{k}c]",
+              f"[r{k}c][r{k}mask]alphamerge,colorchannelmixer=aa={min(1.0, strength):.2f}[r{k}glow]",
+              f"[{out}][r{k}glow]overlay=0:0:{en}:eof_action=pass[r{k}g]"]
+        out = f"r{k}g"
+    elif light == "under_light":  # warm light from below, on the person only
+        g += [f"[r{k}m]alphaextract,geq=lum='lum(X,Y)*pow(Y/H\\,1.6)'[r{k}mask]",
+              f"color=c={colour}:s={w}x{h}:d={b - a:.3f}:r=30,format=rgba,setpts=PTS-STARTPTS+{a:.3f}/TB[r{k}c]",
+              f"[r{k}c][r{k}mask]alphamerge,colorchannelmixer=aa={min(1.0, 0.7 * float(item.get('strength', 1.0))):.2f}[r{k}glow]"]
+    else:
+        g.append(f"[r{k}m]nullsink")
+    g += [f"[r{k}p]{body}[r{k}body]", f"[{out}][r{k}body]overlay=0:0:{en}:eof_action=pass[r{k}o]"]
+    if light == "under_light":
+        g.append(f"[r{k}o][r{k}glow]overlay=0:0:{en}:eof_action=pass[r{k}u]")
+        return g, f"r{k}u"
+    return g, f"r{k}o"
+
+
 # ---------------------------------------------------------------- signature effects (timed by transcript lines)
 
-FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind")
+FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight")
 
 
 def fx_window(item: dict, words: list[list], total: float) -> tuple[float, float]:
@@ -1803,6 +1979,8 @@ def fx_chain(kind: str, w: int, h: int, item: dict) -> str:
         return f"curves=preset=vintage,eq=saturation=1.25:contrast=1.08,rgbashift=rh=-{u}:bh={u},noise=alls={round(16 * strength)}:allf=t,drawgrid=w=0:h={max(3, u * 2)}:t=1:c=black@0.22"
     if kind == "grain":
         return f"noise=alls={round(12 * strength)}:allf=t"
+    if kind == "relight":  # golden hour: no cut-out needed
+        return f"colorbalance=rs={0.12 * strength:.2f}:gs={0.03 * strength:.2f}:bs=-{0.12 * strength:.2f}:rm={0.08 * strength:.2f}:bm=-{0.08 * strength:.2f},eq=brightness=0.03:saturation=1.12,vignette=PI/5"
     raise Problem(f"Unknown effect '{kind}'. Use: {', '.join(FX_TYPES)}.")
 
 
@@ -1811,7 +1989,7 @@ def fx_graph(label: str, cfg: dict, words: list[list], total: float, w: int, h: 
     graph = []
     for k, item in enumerate(cfg.get("fx") or []):
         kind = item.get("type")
-        if kind == "behind":
+        if kind == "behind" or (kind == "relight" and item.get("light", "spotlight") != "golden_hour"):
             continue  # needs the person cut out: done after the main render
         a, b = fx_window(item, words, total)
         if kind == "light_leak":
@@ -1876,7 +2054,9 @@ def split_graph(label: str, cfg: dict, w: int, h: int, fps: float, total: float,
 
 
 def behind_windows(cfg: dict, words: list[list], total: float) -> list[tuple[float, float, dict]]:
-    return [(*fx_window(item, words, total), item) for item in cfg.get("fx") or [] if item.get("type") == "behind"]
+    """Effects that need the person cut out: words behind them, and relighting (except golden hour)."""
+    return [(*fx_window(item, words, total), item) for item in cfg.get("fx") or []
+            if item.get("type") == "behind" or (item.get("type") == "relight" and item.get("light", "spotlight") != "golden_hour")]
 
 
 def behind_ass(path: Path, w: int, h: int, items: list[tuple[float, float, dict]], brand: dict, offset: float) -> None:
@@ -1891,6 +2071,8 @@ def behind_ass(path: Path, w: int, h: int, items: list[tuple[float, float, dict]
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     for a, b, item in items:
+        if item.get("type", "behind") != "behind":
+            continue
         colour = ass_colour(item.get("color") or look["primary"])
         y = round(h * float(item.get("y", 0.38)))
         text = ass_text(str(item.get("text", "")).upper())
@@ -1905,7 +2087,7 @@ def cut_out_person(segment: Path, out: Path) -> None:
         raise Problem("Couldn't cut the person out for the words-behind effect:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-5:]))
 
 
-def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict, w: int, h: int, final: bool, folder: Path, stem: str, offset: float) -> None:
+def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict, w: int, h: int, final: bool, folder: Path, stem: str, offset: float, face=None) -> None:
     """Big words behind the person: the words are drawn on the video, then the cut-out person goes back on top."""
     work = folder / f"{stem}_behind"
     shutil.rmtree(work, ignore_errors=True)
@@ -1927,11 +2109,21 @@ def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict,
         fonts.mkdir()
         if look.get("font_path"):
             shutil.copy2(look["font_path"], fonts / Path(look["font_path"]).name)
-        inputs, chain, label = ["-i", str(base)], [f"[0:v]ass={ass.name}:fontsdir=fonts[bt]"], "bt"
-        for k, (a, b, person) in enumerate(people):
+        inputs, chain, label = ["-i", str(base)], [], "0:v"
+        accent = (brand.get("captions") or {}).get("look", {}).get("accent") or "#FF2BD6"
+        for k, (a, b, person) in enumerate(people):  # relighting first, so words and people go on top of the new light
             inputs += ["-c:v", "libvpx-vp9", "-itsoffset", f"{a:.3f}", "-i", str(person)]
-            chain.append(f"[{label}][{k + 1}:v]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[bh{k}]")
-            label = f"bh{k}"
+            item = items[k][2]
+            if item.get("type") == "relight":
+                part, label = relight_layers(k, item, label, f"{k + 1}:v", a, b, w, h, face, accent)
+                chain += part
+        if any(item.get("type", "behind") == "behind" for _, _, item in items):
+            chain.append(f"[{label}]ass={ass.name}:fontsdir=fonts[bt]")
+            label = "bt"
+            for k, (a, b, person) in enumerate(people):
+                if items[k][2].get("type", "behind") == "behind":
+                    chain.append(f"[{label}][{k + 1}:v]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[bh{k}]")
+                    label = f"bh{k}"
         quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
         run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", "-map", "0:a?", "-c:a", "copy", *quality, "-movflags", "+faststart", str(out)], cwd=work)
         base.unlink(missing_ok=True)

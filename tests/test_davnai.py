@@ -346,3 +346,56 @@ def test_an_empty_brand_kit_is_named_and_offered(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "no colours, logo, handle, voice yet" in out and "update_brand_kit" in out
     assert json.loads((tmp_path / "brand" / "brand.json").read_text())["colours"] == []
+
+
+LOOK = {"size": 0.075}
+MARGINS = {"tall": {"top": 0.12, "bottom": 0.34}, "wide": {"top": 0.08, "bottom": 0.1}}
+
+
+def test_captions_and_titles_move_off_the_face():
+    low_face = (200, 650, 130, 130)  # near the bottom of a 540x960 frame
+    assert davnai.clear_place(None, 540, 960, LOOK, MARGINS, "bottom") == "bottom"
+    assert davnai.clear_place(low_face, 540, 960, LOOK, {"tall": {"top": 0.12, "bottom": 0.2}, "wide": MARGINS["wide"]}, "bottom") == "top"
+    high_face = (200, 120, 130, 130)
+    assert davnai.keep_off_face({"type": "title", "text": "Hi"}, high_face, 540, 960).get("position") not in (None, "top")
+    assert davnai.keep_off_face({"type": "title", "position": "top"}, high_face, 540, 960)["position"] == "top"  # the plan's choice wins
+    assert "position" not in davnai.keep_off_face({"type": "title"}, None, 540, 960)
+
+
+def test_face_lands_where_the_crop_puts_it():
+    box = (1200, 300, 200, 200)  # in a 1920x1080 source
+    x, y, fw, fh = davnai.face_to_output(box, 1920, 1080, 540, 960, 1.0, "crop")
+    cw = 1080 * 540 / 960
+    assert x == pytest.approx((1200 - (1920 - cw)) * 960 / 1080)
+    assert fw == pytest.approx(200 * 960 / 1080)
+    focus = davnai.auto_focus({}, [box], 1920, 1080, 540, 960)
+    centre = davnai.face_to_output(box, 1920, 1080, 540, 960, focus, "crop")
+    assert centre[0] + centre[2] / 2 == pytest.approx(270, abs=1)  # the speaker ends up in the middle
+    assert davnai.auto_focus({"focus_x": 0.2}, [box], 1920, 1080, 540, 960) is None
+    assert davnai.auto_focus({}, [], 1920, 1080, 540, 960) is None
+
+
+def test_relight_lights_build_and_golden_hour_needs_no_cut_out():
+    for light in davnai.LIGHTS[:-1]:
+        graph, label = davnai.relight_layers(0, {"light": light}, "v", "p", 1.0, 2.0, 540, 960, (200, 200, 130, 130), "#FFFFFF")
+        assert label.startswith("r0") and any("between(t,1.000,2.000)" in g for g in graph)
+    with pytest.raises(davnai.Problem):
+        davnai.relight_layers(0, {"light": "disco"}, "v", "p", 1, 2, 540, 960, None, "#FFFFFF")
+    assert "colorbalance" in davnai.fx_chain("relight", 540, 960, {"light": "golden_hour"})
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_spotlight_darkens_the_background_not_the_person(tmp_path, monkeypatch):
+    monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    out = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=180x320:d=3:r=30", "-f", "lavfi", "-i", "sine=d=3", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)], check=True)
+
+    def fake_cutout(seg, person):
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(seg), "-vf", "format=rgba,geq=r=200:g=200:b=200:a='if(between(X,W*0.4,W*0.6),255,0)'", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", str(person)], check=True)
+
+    monkeypatch.setattr(davnai, "cut_out_person", fake_cutout)
+    davnai.apply_behind(out, [(0.5, 2.5, {"type": "relight", "light": "low_key"})], {}, 180, 320, True, tmp_path, "v", 0.0)
+
+    def pixel(x):
+        return subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", "1.5", "-i", str(out), "-frames:v", "1", "-vf", f"crop=2:2:{x}:150", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout[0]
+    assert pixel(88) > 150 and pixel(10) < 70  # the person stays lit, the room goes dark

@@ -19,11 +19,12 @@ Everything the Davnai skill can put in a video. Each page says what it does, whe
 | [handwritten](themes/handwritten.md) | Creator notebook: marker handwriting, tilted notes, casual pops. | Permanent Marker / Permanent Marker | transition whip |
 | [podcast](themes/podcast.md) | Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out. | Poppins ExtraBold / Poppins ExtraBold | fill blur, clean_audio True |
 
-## Signature effects (10)
+## Signature effects (11)
 
 | effect | what it does | plan |
 |---|---|---|
 | [Big words behind the person](effects/behind.md) | The person is cut out and put back in front of huge words, so the words sit behind them. | `"type": "behind"` |
+| [Relight the person](effects/relight.md) | Changes the light around the speaker: spotlight, low_key, silhouette, neon, rim, under_light or golden_hour. The person is cut out so the light hits the room and the person separately (golden_hour needs no cut-out). | `"type": "relight"` |
 | [Camera shake](effects/shake.md) | A short handheld shake. | `"type": "shake"` |
 | [Flash](effects/flash.md) | A quick bright flash (0.15 s). | `"type": "flash"` |
 | [Colour split](effects/rgb.md) | Red and blue separate for a chromatic look. | `"type": "rgb"` |
