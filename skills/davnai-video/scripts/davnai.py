@@ -9,6 +9,9 @@ Commands (python davnai.py <command> --help for details):
   themes                    the built-in themes (12)
   storyboard <plan.json>    the scenes to approve before rendering (and a picture page)
   qc <video>                quality checks (also run after every render)
+  review <plan.json>        a review page: the person marks moments and notes; you get them as line numbers
+  style [--set k=v]         the person's lasting preferences (used for every video)
+  match <reel.mp4>          read a reel they like (pace, colour, loudness) and suggest settings
   catalog [words]           search HyperFrames' 448 ready-made pieces; catalog-get <name> to adapt one
   render <plan.json>        previews (v1, v2, ...); --final for full quality; motion graphics via HyperFrames
   setup [--motion]          install what's missing (asks first; --yes when the person already agreed)
@@ -35,7 +38,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -78,7 +81,7 @@ def probe(path: Path) -> dict:
     need("ffprobe")
     if not path.exists():
         raise Problem(f"Can't find {path}.")
-    out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     if out.returncode != 0:
         raise Problem(f"{path.name} doesn't look like a video or audio file ffmpeg can read.")
     data = json.loads(out.stdout or "{}")
@@ -144,7 +147,7 @@ def ass_time(t: float) -> str:
 
 
 def ffmpeg_major() -> int:
-    out = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+    out = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace").stdout
     m = re.search(r"ffmpeg version n?(\d+)", out)
     return int(m.group(1)) if m else 6
 
@@ -169,7 +172,7 @@ def cmd_check(_args) -> None:
             ok = False
             lines.append(f"✗ {tool}: run python davnai.py setup (or install ffmpeg: Windows winget install Gyan.FFmpeg; Mac brew install ffmpeg; Linux apt install ffmpeg).")
     if shutil.which("ffmpeg"):
-        filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+        filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace").stdout
         lines.append("✓ captions (libass)" if re.search(r"\bass\b", filters) else "✗ this ffmpeg can't burn captions (no libass): install a full ffmpeg build.")
     try:
         import faster_whisper  # noqa: F401
@@ -1086,21 +1089,26 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         if not pieces:
             raise Problem("This output has nothing in 'keep'.")
         pieces = apply_zooms(pieces, cfg, lines)
-        timeline = Timeline(pieces, transition, speed)
         w, h = target_size(aspect, info["width"], info["height"], final)
         fps = 30.0 if aspect != "source" else min(60.0, max(24.0, round(info["fps"])))
+        # Every piece is a whole number of frames (and its sound exactly as long), so captions and graphics never
+        # drift, however many cuts there are.
+        for p in pieces:
+            p["frames"] = max(1, round((p["e"] - p["s"]) / speed * fps))
+            p["e"] = p["s"] + p["frames"] / fps * speed
+        timeline = Timeline(pieces, transition, speed)
         si = add_input("-i", str(source))
         tempo = f",atempo={speed:g}" if abs(speed - 1) > 0.001 else ""
         for k, p in enumerate(pieces):
             # Each piece is shaped to the output first, so zooms work on the small frame (fast, little memory).
-            graph.append(f"[{si}:v]trim=start={p['s']:.3f}:end={p['e']:.3f},setpts=PTS-STARTPTS[pv{k}]")
+            graph.append(f"[{si}:v]trim=start={p['s']:.4f}:end={p['e'] + 2 / fps:.4f},setpts=PTS-STARTPTS[pv{k}]")
             graph += shape(f"pv{k}", f"ps{k}", info["width"], info["height"], w, h, focus_x, fps, fill)
             z = zoom_filter(p.get("z", 1.0), p.get("zs", "punch"), w, h, 0.5, fps)
-            graph.append(f"[ps{k}]{z}setpts=(PTS-STARTPTS)/{speed:g},setsar=1[v{k}]")
+            graph.append(f"[ps{k}]{z}setpts=(PTS-STARTPTS)/{speed:g},fps={fps:g},tpad=stop_mode=clone:stop=3,trim=end_frame={p['frames']},setpts=PTS-STARTPTS,setsar=1[v{k}]")
             if info["audio"]:
-                graph.append(f"[{si}:a]atrim=start={p['s']:.3f}:end={p['e']:.3f},asetpts=PTS-STARTPTS{tempo},{AUDIO_FMT}[a{k}]")
+                graph.append(f"[{si}:a]atrim=start={p['s']:.4f}:end={p['e']:.4f},asetpts=PTS-STARTPTS{tempo},{AUDIO_FMT},apad,atrim=end_sample={round(p['frames'] / fps * 48000)}[a{k}]")
             else:
-                graph.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={(p['e'] - p['s']) / speed:.3f},aformat=sample_fmts=fltp[a{k}]")
+                graph.append(f"anullsrc=r=48000:cl=stereo,atrim=end_sample={round(p['frames'] / fps * 48000)},aformat=sample_fmts=fltp[a{k}]")
         index = {id(p): k for k, p in enumerate(pieces)}
         for gi, group in enumerate(timeline.groups):
             ks = [index[id(p)] for p in group]
@@ -1864,6 +1872,279 @@ def cmd_catalog_get(args) -> None:
         "then use it as {\"type\": \"block\", \"html\": \"<your copy>\", \"lines\": [a, b]} (a block) or adapt it into a custom graphic (a component).")
 
 
+# ---------------------------------------------------------------- review page, style profile, matching a reel
+
+STYLE_FILE = BRAND_DIR.parent / "style.json"
+MARKS = ("change", "cut", "keep", "question")
+
+
+def load_style() -> dict:
+    try:
+        return json.loads(STYLE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"preferences": {}, "notes": []}
+
+
+def save_style(style: dict) -> None:
+    STYLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STYLE_FILE.write_text(json.dumps(style, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+def with_style(cfg: dict) -> dict:
+    """The person's saved preferences sit under the plan (the plan always wins) and over the theme."""
+    prefs = load_style().get("preferences") or {}
+    return {**prefs, **cfg} if prefs else cfg
+
+
+def cmd_style(args) -> None:
+    style = load_style()
+    changed = False
+    for pair in args.set or []:
+        if "=" not in pair:
+            raise Problem("Use --set key=value, e.g. --set caption_words=3 or --set theme=bold.")
+        key, raw = pair.split("=", 1)
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        style["preferences"][key.strip()] = value
+        changed = True
+    for key in args.unset or []:
+        changed = style["preferences"].pop(key, None) is not None or changed
+    if args.note:
+        style["notes"] = (style.get("notes") or [])[-49:] + [f"{time.strftime('%Y-%m-%d')}: {args.note}"]
+        changed = True
+    if changed:
+        save_style(style)
+    prefs = style.get("preferences") or {}
+    say("Their style (used for every video unless the plan says otherwise):",
+        *(f"  {k}: {json.dumps(v)}" for k, v in prefs.items()) or ["  (nothing saved yet)"],
+        *(["What they've said before:"] + [f"  - {n}" for n in (style.get("notes") or [])[-12:]] if style.get("notes") else []))
+
+
+def output_digest(cfg: dict, plan: dict, plan_dir: Path, final: bool) -> str:
+    """A fingerprint of everything that makes an output: its settings, the Brand Kit, its files and this script."""
+    import hashlib
+
+    parts = [VERSION, json.dumps(cfg, sort_keys=True), json.dumps(plan.get("theme"), sort_keys=True), str(final)]
+    brand = BRAND_DIR / "brand.json"
+    parts.append(str(brand.stat().st_mtime) if brand.exists() else "-")
+    parts.append(json.dumps(load_style().get("preferences") or {}, sort_keys=True))
+    for value in json.dumps(cfg).split('"'):
+        if re.search(r"\.(mp4|mov|mkv|webm|mp3|wav|m4a|png|jpe?g|webp|html)$", value, re.I):
+            p = Path(value).expanduser()
+            p = p if p.is_absolute() else (plan_dir / p)
+            parts.append(f"{value}:{p.stat().st_mtime if p.exists() else '-'}")
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def review_data(folder: Path, name: str, version: int, video: Path) -> dict:
+    """What the review page shows: the transcript lines where they are in this version, and its scenes and graphics."""
+    timing = json.loads((folder / f"{name}_v{version}.timing.json").read_text(encoding="utf-8"))
+    cfg = json.loads((folder / f"{name}_v{version}.plan.json").read_text(encoding="utf-8"))
+    texts = {}
+    transcript = folder / "transcript.json"  # the .davnai folder belongs to the recording (or voice-over) being edited
+    if transcript.exists():
+        texts = {str(ln["id"]): " ".join(w[0] for w in ln["words"]) for ln in json.loads(transcript.read_text(encoding="utf-8"))["lines"]}
+    lines = sorted(({"id": int(k), "start": v[0], "end": v[1], "text": texts.get(k, "")} for k, v in timing["lines"].items()), key=lambda x: x["start"])
+    windows = timing["lines"]
+
+    def span(rng):
+        rng = [rng, rng] if isinstance(rng, int) else rng
+        found = [windows[str(n)] for n in range(int(rng[0]), int(rng[1]) + 1) if str(n) in windows] if isinstance(rng, (list, tuple)) and len(rng) == 2 else []
+        return (min(f[0] for f in found), max(f[1] for f in found)) if found else None
+
+    scenes = []
+    for k, item in enumerate(cfg.get("keep") or cfg.get("scenes") or []):
+        if isinstance(item, dict) and "lines" in item:
+            rng = item["lines"]
+        elif isinstance(item, dict):
+            rng = [(item.get("from") or [0])[0], (item.get("to") or [0])[0]]
+        else:
+            rng = item if isinstance(item, (list, tuple)) else [item, item]
+        s = span(rng)
+        if s:
+            scenes.append({"label": f"Scene {k + 1}", "start": s[0], "end": s[1]})
+    graphics = []
+    for item in (cfg.get("motion") or []) + (cfg.get("fx") or []):
+        s = span(item.get("lines")) if item.get("lines") is not None else None
+        if item.get("at") == "start":
+            s = (0, float(item.get("seconds", 3)))
+        if s:
+            graphics.append({"label": f"{item.get('type')}{': ' + str(item.get('text') or item.get('name') or '') if item.get('text') or item.get('name') else ''}", "start": s[0], "end": s[1]})
+    return {"name": name, "version": version, "video": video.name, "duration": probe(video)["seconds"], "lines": lines, "scenes": scenes, "graphics": graphics}
+
+
+REVIEW_PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>Review __TITLE__</title><style>
+body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f4f7;color:#111}header{padding:14px 20px;background:#fff;border-bottom:1px solid #e5e5ea}
+main{display:grid;grid-template-columns:minmax(260px,420px) 1fr;gap:18px;padding:18px 20px}@media(max-width:900px){main{grid-template-columns:1fr}}
+video{width:100%;max-height:70vh;background:#000;border-radius:10px}.card{background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:14px}
+.lane{position:relative;height:26px;background:#eee;border-radius:6px;margin:6px 0 2px;cursor:pointer}.lane span{position:absolute;top:2px;bottom:2px;border-radius:4px;font-size:11px;color:#fff;overflow:hidden;white-space:nowrap;padding:3px 4px;box-sizing:border-box}
+.scenes span{background:#5b4bdb}.gfx span{background:#e0662f}.marksl span{background:#111;width:3px!important;padding:0}.lab{font-size:12px;color:#666}#head{position:absolute;top:-2px;bottom:-2px;width:2px;background:#e11}
+.lines{max-height:46vh;overflow:auto}.ln{padding:5px 6px;border-radius:6px;cursor:pointer;font-size:14px}.ln:hover{background:#f0f0f5}.ln.on{background:#ece9ff}.ln b{color:#888;font-weight:500;margin-right:6px}
+.btns button{margin:4px 6px 4px 0;padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;font-weight:600}.btns button.sel{background:#111;color:#fff;border-color:#111}
+textarea{width:100%;box-sizing:border-box;border-radius:8px;border:1px solid #ccc;padding:8px;font:inherit}.primary{background:#5b4bdb!important;color:#fff!important;border-color:#5b4bdb!important}
+.mark{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:6px 0;border-bottom:1px solid #eee}.mark .t{font-weight:700;min-width:84px}.mark button{margin-left:auto;border:none;background:none;color:#999;cursor:pointer}
+#msg{font-size:13px;color:#2a7}</style></head><body>
+<header><b>Review: __TITLE__</b> <span class="lab">Pause where something should change, pick a mark, write a note, press Add. Press Done when you've finished.</span></header>
+<main><div><video id="v" controls playsinline src="__VIDEO__"></video>
+<div class="card"><div class="lab">Scenes</div><div class="lane scenes" id="ls"></div><div class="lab">Graphics and effects</div><div class="lane gfx" id="lg"></div><div class="lab">Your marks</div><div class="lane marksl" id="lm"><div id="head"></div></div></div></div>
+<div><div class="card"><div class="btns" id="kinds"></div><textarea id="note" rows="2" placeholder="What should change here? (e.g. cut this, bigger captions, use a different clip)"></textarea>
+<div class="btns"><button class="primary" id="add">Add mark at <span id="now">0:00</span></button><button id="general">Add a note for the whole video</button></div></div>
+<div class="card"><b>Marks</b><div id="marks"></div><div class="btns"><button class="primary" id="done">Done: send to the AI</button><button id="copy">Copy notes</button><button id="dl">Download notes</button></div><div id="msg"></div></div>
+<div class="card"><b>What's said</b> <span class="lab">(click a line to jump)</span><div class="lines" id="lines"></div></div></div></main>
+<script>
+const D=__DATA__;const v=document.getElementById('v');let kind='change';let marks=[];
+const fmt=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');
+const lineAt=t=>{let best=null;for(const l of D.lines){if(t>=l.start-0.2&&t<=l.end+0.3)return l;if(!best||Math.abs(l.start-t)<Math.abs(best.start-t))best=l;}return best;};
+function lane(id,items){const el=document.getElementById(id);items.forEach(it=>{const s=document.createElement('span');s.style.left=(it.start/D.duration*100)+'%';s.style.width=Math.max(.6,(it.end-it.start)/D.duration*100)+'%';s.textContent=it.label||'';s.title=it.label||'';s.onclick=e=>{e.stopPropagation();v.currentTime=it.start;};el.appendChild(s);});el.onclick=e=>{const r=el.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*D.duration;};}
+lane('ls',D.scenes);lane('lg',D.graphics);
+const kinds={change:'Change',cut:'Cut',keep:'Keep',question:'Question'};const kb=document.getElementById('kinds');
+Object.entries(kinds).forEach(([k,l])=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>{kind=k;[...kb.children].forEach(c=>c.classList.toggle('sel',c===b));};if(k===kind)b.classList.add('sel');kb.appendChild(b);});
+const L=document.getElementById('lines');D.lines.forEach(l=>{const d=document.createElement('div');d.className='ln';d.dataset.id=l.id;d.innerHTML='<b>'+fmt(l.start)+' · #'+l.id+'</b>';d.appendChild(document.createTextNode(l.text));d.onclick=()=>{v.currentTime=l.start;v.play();};L.appendChild(d);});
+v.ontimeupdate=()=>{document.getElementById('now').textContent=fmt(v.currentTime);document.getElementById('head').style.left=(v.currentTime/D.duration*100)+'%';const l=lineAt(v.currentTime);document.querySelectorAll('.ln').forEach(x=>x.classList.toggle('on',l&&x.dataset.id==l.id));};
+function draw(){const m=document.getElementById('marks');m.innerHTML='';const lm=document.getElementById('lm');lm.querySelectorAll('span').forEach(s=>s.remove());
+marks.forEach((k,i)=>{const r=document.createElement('div');r.className='mark';r.innerHTML='<span class="t">'+(k.time==null?'Whole video':fmt(k.time)+' #'+k.line)+'</span>';const t=document.createElement('span');t.textContent='['+kinds[k.kind]+'] '+k.note;r.appendChild(t);const x=document.createElement('button');x.textContent='✕';x.onclick=()=>{marks.splice(i,1);draw();save();};r.appendChild(x);m.appendChild(r);
+if(k.time!=null){const s=document.createElement('span');s.style.left=(k.time/D.duration*100)+'%';s.title=k.note;lm.appendChild(s);}});}
+function add(whole){const note=document.getElementById('note').value.trim();if(!note&&kind!=='cut'&&kind!=='keep'){document.getElementById('note').focus();return;}const t=v.currentTime;const l=whole?null:lineAt(t);
+marks.push({kind,time:whole?null:Math.round(t*10)/10,line:l?l.id:null,said:l?l.text:null,note});document.getElementById('note').value='';draw();save();}
+document.getElementById('add').onclick=()=>add(false);document.getElementById('general').onclick=()=>add(true);
+const text=()=>'Review notes for '+D.name+' v'+D.version+':\n'+marks.map(k=>'- ['+k.kind+'] '+(k.time==null?'whole video':fmt(k.time)+' line '+k.line+(k.said?' ("'+k.said.slice(0,60)+'")':''))+': '+(k.note||'(no note)')).join('\n');
+const payload=()=>JSON.stringify({name:D.name,version:D.version,marks});
+async function save(done){try{const r=await fetch(done?'/done':'/notes',{method:'POST',body:payload()});document.getElementById('msg').textContent=r.ok?(done?'Sent. You can close this page and go back to the chat.':'Saved'):'';}catch(e){document.getElementById('msg').textContent=done?'Not connected: press Copy notes and paste them into the chat.':'';}}
+document.getElementById('done').onclick=()=>save(true);
+document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text());document.getElementById('msg').textContent='Copied: paste them into the chat.';}catch(e){prompt('Copy these notes:',text());}};
+document.getElementById('dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([payload()],{type:'application/json'}));a.download=D.name+'_v'+D.version+'_notes.json';a.click();};
+fetch('/notes').then(r=>r.ok?r.json():null).then(j=>{if(j&&j.marks){marks=j.marks;draw();}}).catch(()=>{});
+</script></body></html>"""
+
+
+def notes_text(notes: dict) -> list[str]:
+    out = [f"Review notes for {notes.get('name')} v{notes.get('version')} ({len(notes.get('marks') or [])} marks):"]
+    for m in notes.get("marks") or []:
+        where = "whole video" if m.get("time") is None else f"{int(m['time'] // 60)}:{int(m['time'] % 60):02d} line {m.get('line')}" + (f" (\"{(m.get('said') or '')[:60]}\")" if m.get("said") else "")
+        out.append(f"  - [{m.get('kind')}] {where}: {m.get('note') or '(no note)'}")
+    out.append("Change the plan by line numbers, render a new version, and save any lasting preference with `davnai.py style`.")
+    return out
+
+
+def cmd_review(args) -> None:
+    import http.server
+    import threading
+    import webbrowser
+
+    plan_path = Path(args.plan).expanduser().resolve()
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    outputs = [o for o in plan.get("outputs", []) if not args.only or o.get("name") in args.only]
+    if not outputs:
+        raise Problem("No output to review.")
+    cfg = outputs[0]
+    name = re.sub(r"[^\w\-]", "_", cfg.get("name") or "video")
+    anchor = Path(cfg.get("voice") or cfg.get("source") or plan.get("source") or plan_path.name)
+    anchor = anchor if anchor.is_absolute() else (plan_path.parent / anchor)
+    folder = plan_path.parent if plan_path.parent.name.endswith(".davnai") else workdir(anchor.resolve())
+    version = args.version or max(1, next_version(folder, name) - 1)
+    video = folder / f"{name}_v{version}_preview.mp4"
+    if not video.exists():
+        raise Problem(f"There's no preview v{version} of {name} yet. Render it first.")
+    data = review_data(folder, name, version, video)
+    page = folder / f"{name}_v{version}_review.html"
+    page.write_text(REVIEW_PAGE.replace("__TITLE__", esc(f"{name} v{version}")).replace("__VIDEO__", esc(video.name)).replace("__DATA__", json.dumps(data).replace("</", "<\\/")), encoding="utf-8")
+    notes_file = folder / f"{name}_v{version}_notes.json"
+    finished = threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, body=b"", kind="application/json", extra=None):
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            if path in ("/", f"/{page.name}"):
+                return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
+            if path == "/notes":
+                return self._send(200, notes_file.read_bytes()) if notes_file.exists() else self._send(404)
+            if path == f"/{video.name}":  # with Range support so the player can jump around
+                size = video.stat().st_size
+                rng = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
+                start, end = (int(rng.group(1) or 0), int(rng.group(2) or size - 1)) if rng else (0, size - 1)
+                end = min(end, size - 1)
+                with video.open("rb") as f:
+                    f.seek(start)
+                    body = f.read(end - start + 1)
+                return self._send(206 if rng else 200, body, "video/mp4", {"Accept-Ranges": "bytes", **({"Content-Range": f"bytes {start}-{end}/{size}"} if rng else {})})
+            return self._send(404)
+
+        do_HEAD = do_GET
+
+        def do_POST(self):
+            body = self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 1_000_000))
+            try:
+                notes = json.loads(body)
+                assert isinstance(notes.get("marks"), list)
+            except Exception:  # noqa: BLE001
+                return self._send(400)
+            notes_file.write_text(json.dumps(notes, indent=1, ensure_ascii=False), encoding="utf-8")
+            self._send(200, b"{}")
+            if self.path == "/done":
+                finished.set()
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    say(f"Review page: {url} (also saved as {page})", "Opening it for the person. Waiting until they press Done (up to {} minutes)...".format(args.wait))
+    if not args.no_browser:
+        webbrowser.open(url)
+    finished.wait(timeout=args.wait * 60)
+    server.shutdown()
+    if notes_file.exists():
+        say(*notes_text(json.loads(notes_file.read_text(encoding="utf-8"))))
+    else:
+        say("No notes yet. If the person copied them, they'll paste them into the chat; `davnai.py notes` shows saved ones later.")
+
+
+def cmd_notes(args) -> None:
+    folder = Path(args.folder).expanduser().resolve()
+    files = sorted(folder.glob("*_notes.json"), key=lambda p: p.stat().st_mtime)
+    if not files:
+        raise Problem(f"No review notes in {folder}.")
+    say(*notes_text(json.loads(files[-1].read_text(encoding="utf-8"))))
+
+
+def cmd_match(args) -> None:
+    """Reads a reel the person likes (pace, colour, loudness, shape) and suggests settings to match it."""
+    need("ffmpeg")
+    ref = Path(args.video).expanduser().resolve()
+    info = probe(ref)
+    log = measure(ref, "select='gt(scene,0.32)',showinfo")
+    cuts = len(re.findall(r"pts_time:", log))
+    per_min = cuts / max(info["seconds"] / 60, 0.01)
+    stats = measure(ref, "fps=2,signalstats,metadata=print")
+    mean = lambda key: (lambda xs: sum(xs) / len(xs) if xs else 0)([float(x) for x in re.findall(rf"lavfi\.signalstats\.{key}=([\d.]+)", stats)])  # noqa: E731
+    bright, sat, hue_u, hue_v = mean("YAVG"), mean("SATAVG"), mean("UAVG"), mean("VAVG")
+    loud = re.findall(r"I:\s+(-?[\d.]+) LUFS", measure(ref, "a:ebur128").split("Summary:")[-1]) if info["audio"] else []
+    warm = hue_v - hue_u
+    look = "bw" if sat < 6 else "vivid" if sat > 55 else "warm" if warm > 8 else "cool" if warm < -8 else "cinematic" if bright < 85 else "soft"
+    theme = "bold" if per_min > 28 else "minimal" if per_min < 6 else "editorial" if bright < 90 and sat < 40 else "clean"
+    suggestions = {"theme": theme, "look": look, "transition": "cut" if per_min > 20 else "dissolve", "tighten": per_min > 10, "auto_zoom": per_min > 18, "aspect": "9:16" if info["height"] > info["width"] else "16:9" if info["width"] > info["height"] else "1:1"}
+    sheet = ref.with_name(ref.stem + "_match.jpg")
+    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(ref), "-vf", f"fps={6 / max(info['seconds'], 1):.4f},scale=240:-2,tile=6x1", "-frames:v", "1", str(sheet)])
+    say(f"{ref.name}: {info['seconds']:.0f}s, {info['width']}x{info['height']}, about {per_min:.0f} cuts a minute (a shot every {60 / max(per_min, 0.1):.1f}s)"
+        + (f", loudness {float(loud[-1]):.1f} LUFS" if loud else "") + f", brightness {bright:.0f}/255, colour {sat:.0f} ({'warm' if warm > 8 else 'cool' if warm < -8 else 'neutral'}).",
+        f"Suggested settings: {json.dumps(suggestions)}",
+        f"Six stills: {sheet} — look at them for the caption font, size, colours and position, then set the theme's \"caption\" to match (reference/themes.md).",
+        "Save it for every video with: davnai.py style --set theme=... --set look=... --note \"matches <reel>\"")
+
+
 # ---------------------------------------------------------------- storyboard
 
 
@@ -1987,7 +2268,7 @@ def node_major() -> int:
     node = shutil.which("node")
     if not node:
         return 0
-    out = subprocess.run([node, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+    out = subprocess.run([node, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace").stdout
     m = re.match(r"v(\d+)", out.strip())
     return int(m.group(1)) if m else 0
 
@@ -2015,9 +2296,9 @@ def cmd_setup(args) -> None:
     lines, restart = [], False
     pip = [sys.executable, "-m", "pip", "install", "--user", "--quiet", "faster-whisper", "fonttools", "brotli", "opencv-python-headless"]
     say("Installing the Python parts (speech-to-text, brand fonts, face check)...")
-    proc = subprocess.run(pip, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.run(pip, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0 and "externally-managed" in (proc.stderr or ""):
-        proc = subprocess.run([*pip, "--break-system-packages"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.run([*pip, "--break-system-packages"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     lines.append("✓ Python parts" if proc.returncode == 0 else f"✗ Python parts: {(proc.stderr or '').strip().splitlines()[-1:]}")
     needed = ["ffmpeg"] + (["node"] if args.motion and node_major() < 22 else [])
     for tool in needed:
@@ -2091,11 +2372,19 @@ def cmd_render(args) -> None:
             if not snap.exists():
                 raise Problem(f"There's no version {args.from_version} of {name}.")
             cfg = json.loads(snap.read_text(encoding="utf-8"))
-        version = next_version(folder, name) if not args.final else max(1, next_version(folder, name) - 1)
+        cfg = with_style(cfg)
+        digest = output_digest(cfg, plan, plan_path.parent, args.final)
+        last = max(1, next_version(folder, name) - 1)
+        last_digest = folder / f"{name}_v{last}{'_final' if args.final else ''}.digest"
+        if not args.force and last_digest.exists() and last_digest.read_text().strip() == digest:
+            made.append(f"{name}: unchanged since v{last}, kept (use --force to make it again)")
+            continue
+        version = next_version(folder, name) if not args.final else last
         if not args.final:
             (folder / f"{name}_v{version}.plan.json").write_text(json.dumps(cfg, indent=1), encoding="utf-8")
         start = time.time()
         out, checks = render_output(plan_path.parent, cfg, plan, brand, args.final, version, folder)
+        (folder / f"{name}_v{version}{'_final' if args.final else ''}.digest").write_text(digest)
         info = probe(out)
         made.append(f"{'Final' if args.final else f'Preview v{version}'} of {name}: {out} ({info['seconds']:.1f}s, {info['width']}x{info['height']}, made in {time.time() - start:.0f}s)")
         made += [f"  {c}" for c in checks]
@@ -2181,6 +2470,11 @@ def cmd_upload(args) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows terminals: ✓ and ⚠ must never crash the script
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(prog="davnai.py", description="Davnai video editing on your own computer.")
     parser.add_argument("--version", action="version", version=VERSION)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2204,6 +2498,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--final", action="store_true")
     p.add_argument("--only", nargs="*", help="only these output names")
     p.add_argument("--from-version", type=int, help="render an earlier version's plan again")
+    p.add_argument("--force", action="store_true", help="make outputs again even if nothing changed")
     p.set_defaults(fn=cmd_render)
     p = sub.add_parser("storyboard", help="the scene list and a picture page to approve before rendering")
     p.add_argument("plan")
@@ -2220,6 +2515,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--speed", type=float, default=1.0)
     p.set_defaults(fn=cmd_voice)
     sub.add_parser("themes", help="the built-in themes").set_defaults(fn=cmd_themes)
+    p = sub.add_parser("review", help="open the review page for the latest preview and wait for the person's notes")
+    p.add_argument("plan")
+    p.add_argument("--only", nargs="*")
+    p.add_argument("--version", type=int)
+    p.add_argument("--wait", type=int, default=30, help="minutes to wait for Done (default 30)")
+    p.add_argument("--port", type=int, default=0)
+    p.add_argument("--no-browser", action="store_true")
+    p.set_defaults(fn=cmd_review)
+    p = sub.add_parser("notes", help="the latest saved review notes in a .davnai folder")
+    p.add_argument("folder")
+    p.set_defaults(fn=cmd_notes)
+    p = sub.add_parser("style", help="the person's saved style; --set key=value, --unset key, --note text")
+    p.add_argument("--set", nargs="*")
+    p.add_argument("--unset", nargs="*")
+    p.add_argument("--note")
+    p.set_defaults(fn=cmd_style)
+    p = sub.add_parser("match", help="read a reel the person likes and suggest settings to match it")
+    p.add_argument("video")
+    p.set_defaults(fn=cmd_match)
     p = sub.add_parser("catalog", help="search HyperFrames' catalog of ready-made pieces (needs setup --motion)")
     p.add_argument("words", nargs="*")
     p.add_argument("--type", choices=["block", "component"])

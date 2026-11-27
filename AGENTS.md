@@ -1,6 +1,6 @@
 # Davnai skills: instructions for agents
 
-This folder holds Davnai's video editing skill: `skills/davnai-video/SKILL.md`. Read it before editing a video for the person, and follow its rules:
+This folder holds Davnai's skills: `skills/davnai-video` (editing on this computer), `skills/davnai-posts` (writing and scheduling posts), `skills/davnai-hooks` (hook formulas) and `skills/davnai-coach` (the front door). Read the matching SKILL.md before the task. For video, follow its rules:
 
 - Edit on this computer with `skills/davnai-video/scripts/davnai.py`. Use Davnai (the connected app, https://davnai.com/mcp) only for the Brand Kit (`get_brand_files`), the upload (`upload_from_computer`) and posting. Never call Davnai's own editing tools for an edit made here.
 - Never change the original video. Pick transcript line numbers; never write times yourself.

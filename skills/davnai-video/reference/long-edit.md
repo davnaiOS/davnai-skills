@@ -1,6 +1,7 @@
 # A full edit (YouTube, a lesson, a podcast)
 
 - Keep the story in order. Remove: false starts, repeated takes (keep the last good one), long tangents, "can you hear me", dead air at the start and end.
+- A repeated take is a sentence the person **abandoned and started again**. A finished sentence is never a retake, even when the next one starts with the same words ("The first step is to plan. The first step is also the hardest." keeps both). When unsure, keep it and ask.
 - `"tighten": true` shortens pauses; leave it off for slow, calm talks if the person prefers the pace.
 - Tutorials: never remove a step, even if it's slow.
 - Keep it honest: never join lines so the person seems to say something they didn't.

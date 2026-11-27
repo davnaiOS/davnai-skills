@@ -15,16 +15,26 @@ Skills that teach your AI (Claude, ChatGPT and Codex, Gemini, Cursor and other a
 - **Storyboard first:** a scene-by-scene plan and a picture page to approve before anything is rendered.
 - **Free voice-overs** made on your computer for faceless videos, and built-in sound effects (whoosh, pop, impact, riser...).
 - **Quality checks** on every render: black or frozen picture, loudness for social apps, long silences, captions covering a face.
+- **Review page:** you mark moments on the video (change, cut, keep, question) and your AI gets your notes as transcript lines; it remembers your lasting preferences and can match the style of a reel you like.
 - **You approve everything:** quick previews first, the final only when you say so, and posts wait for your OK in Davnai.
 - **Cheaper:** the editing runs on your computer with free tools (ffmpeg and a local speech model), and the AI picks moments by line number instead of guessing times, so it uses far fewer tokens.
+
+## The skills
+
+| Skill | What it does |
+|---|---|
+| `davnai-video` | Edits on your computer: Shorts, full edits, faceless videos, 12 themes, motion graphics, effects, storyboard, review page, quality checks, upload to Davnai. |
+| `davnai-posts` | Writes posts in your voice for each platform, grades drafts (with the 3 fixes that matter most), turns one video into a week of content and schedules it in Davnai for your approval. |
+| `davnai-hooks` | 100 hook formulas in ten families for first lines, Short titles and the first words on camera. |
+| `davnai-coach` | The front door: works out your goal, reads what Davnai knows (Brand Kit, accounts, results) and runs the right skill or Davnai tool, including comment-to-DM automations. |
 
 ## Get started
 
 1. **Connect Davnai** to your AI app: add the connector with the address `https://davnai.com/mcp` and sign in. (In Claude and ChatGPT, look for Davnai in the connectors list.)
 2. **Install the skill:**
    - **Claude Code:** `/plugin marketplace add davnaiOS/davnai-skills`, then `/plugin install davnai@davnai` (this also connects Davnai).
-   - **Codex:** `$skill-installer` with `https://github.com/davnaiOS/davnai-skills/tree/main/skills/davnai-video`, or copy `skills/davnai-video` to `~/.codex/skills/`.
-   - **Gemini CLI, Cursor, Copilot and others:** copy `skills/davnai-video` into the app's skills folder (for example `.agents/skills/`, `.gemini/skills/`, `.github/skills/`).
+   - **Codex:** `$skill-installer` with `https://github.com/davnaiOS/davnai-skills/tree/main/skills/davnai-video` (and the other skills), or copy the folders in `skills/` to `~/.codex/skills/`.
+   - **Gemini CLI, Cursor, Copilot and others:** copy the folders in `skills/` into the app's skills folder (for example `.agents/skills/`, `.gemini/skills/`, `.github/skills/`).
    - **No skill installed?** Davnai's connector serves the same guide (`get_editing_guide`), so connecting Davnai is enough to start.
 3. **Ask**, for example:
    - "Make 3 Shorts from interview.mp4 and post them to TikTok and Instagram on Friday."
@@ -48,6 +58,10 @@ skills/davnai-video/
   SKILL.md            the steps and rules your AI follows
   reference/          Shorts, long edits, faceless videos, captions, themes, effects, motion graphics, stock, uploading
   scripts/davnai.py   the editing script (Python + ffmpeg)
+skills/davnai-posts/  writing, grading, repurposing and scheduling posts
+skills/davnai-hooks/  100 hook formulas
+skills/davnai-coach/  the front door
+tests/                tests for the script (python -m pytest tests)
 .claude-plugin/       Claude Code plugin and marketplace
 .mcp.json             connects Davnai (https://davnai.com/mcp)
 AGENTS.md, CLAUDE.md  short instructions for agents working in this folder

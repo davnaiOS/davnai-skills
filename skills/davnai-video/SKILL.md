@@ -19,7 +19,8 @@ You edit with free tools on this computer (ffmpeg and a local speech-to-text mod
 ## Setup (once)
 
 - Run `python davnai.py check`. If something is missing, ask the person ("Davnai needs ffmpeg and a speech-to-text model on your computer. Install them?"), then run `python davnai.py setup --yes`. Add `--motion` for motion graphics (it installs Node.js, HyperFrames and GSAP; a few hundred MB). On Windows, run `check` again in a new terminal after installing.
-- No Python? Windows: `winget install -e --id Python.Python.3.12`; Mac: `brew install python`. Then open a new terminal.
+- No Python? Windows: `winget install -e --id Python.Python.3.12`; Mac: `brew install python`. Then open a new terminal. On Windows, if `python` opens the Microsoft Store or does nothing, use `py davnai.py ...` instead.
+- **Their style:** run `python davnai.py style` at the start. It shows what the person prefers (saved from earlier videos); the script uses it for every video unless the plan says otherwise.
 - The script is `scripts/davnai.py` in this skill. Without the skill installed, download it from https://davnai.com/skills/davnai.py.
 
 ## Steps
@@ -28,11 +29,16 @@ You edit with free tools on this computer (ffmpeg and a local speech-to-text mod
 2. **Transcript:** `python davnai.py transcribe "<video>"` prints numbered lines like `#12 (4.1s) the three mistakes everyone makes`. A second run reuses it.
 3. **Plan:** write `plan.json` in the `.davnai` folder (format below). For Shorts, read `reference/shorts.md`; long edits `reference/long-edit.md`; faceless videos `reference/faceless.md`; captions `reference/captions.md`; themes `reference/themes.md`; effects `reference/effects.md`; motion graphics `reference/motion.md`; stock `reference/stock.md`.
 4. **Storyboard:** `python davnai.py storyboard "<plan.json>"` prints each scene (lines, length, what's said, what happens on screen) and makes a picture page (`plan_storyboard.html`). Show the person the scene list and the page, and change the plan until they approve it. Skip it only for a simple cut they've already described.
-5. **Preview:** `python davnai.py render "<plan.json>"` makes a small, fast preview for each output and prints where it is. Tell the person to watch it.
-6. **Changes:** change the plan and render again; each round is a new version (v2, v3…) and earlier ones are kept. "Go back to v2": `--from-version 2`.
-7. **Final:** only when they say it's the one: `python davnai.py render "<plan.json>" --final`.
-8. **Upload:** ask "Upload this to Davnai?". Then `python davnai.py probe "<final>"`, call Davnai's `upload_from_computer` with what it printed, and run `python davnai.py upload "<final>" "<ticket>"`. It prints the video id.
-9. **Post:** write the captions yourself in their Brand Kit voice and use Davnai's `create_posts` with the video id. Posts wait for their approval in Davnai unless they've said otherwise.
+5. **Preview:** `python davnai.py render "<plan.json>"` makes a small, fast preview for each output, checks it, and prints where it is. Outputs that didn't change since the last version are kept, not made again.
+6. **Review:** `python davnai.py review "<plan.json>" --only <name>` opens a review page in their browser: the video, its scenes and graphics, and the transcript. They mark moments (change, cut, keep, question) with notes and press Done; you get the notes as line numbers. Run it with a long timeout or in the background (it waits up to 30 minutes). If it can't open, they can paste notes into the chat ("Copy notes").
+7. **Changes:** change the plan and render again; each round is a new version (v2, v3…) and earlier ones are kept. "Go back to v2": `--from-version 2`. When a note is a lasting preference ("always smaller captions", "I like warm colour"), save it: `python davnai.py style --set caption_words=3 --set look=warm --note "smaller captions, warm colour"`.
+8. **Final:** only when they say it's the one: `python davnai.py render "<plan.json>" --final`.
+9. **Upload:** ask "Upload this to Davnai?". Then `python davnai.py probe "<final>"`, call Davnai's `upload_from_computer` with what it printed, and run `python davnai.py upload "<final>" "<ticket>"`. It prints the video id.
+10. **Post:** write the captions yourself in their Brand Kit voice and use Davnai's `create_posts` with the video id. Posts wait for their approval in Davnai unless they've said otherwise.
+
+## Matching a reel they like
+
+`python davnai.py match "<reel.mp4>"` reads its pace (cuts a minute), colour, loudness and shape, suggests a theme and settings, and saves six stills to look at for the caption style. Set the plan from it, and save it with `style` if they want it every time.
 
 ## Quality checks
 

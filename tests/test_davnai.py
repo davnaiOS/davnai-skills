@@ -141,6 +141,7 @@ def test_upload_refuses_a_file_of_another_size(tmp_path, capsys):
 @pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
 def test_render_preview_versions_and_final(tmp_path, monkeypatch):
     monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    monkeypatch.setattr(davnai, "STYLE_FILE", tmp_path / "style.json")
     video = tmp_path / "talk.mp4"
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "12", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(video)], check=True)
     folder = davnai.workdir(video)
@@ -149,7 +150,9 @@ def test_render_preview_versions_and_final(tmp_path, monkeypatch):
     plan = folder / "plan.json"
     plan.write_text(json.dumps({"source": "../talk.mp4", "outputs": [{"name": "s1", "aspect": "9:16", "keep": [[3, 4], [1, 2]], "tighten": True, "captions": True, "transition": "flash", "auto_zoom": True, "hook_text": "Hi", "progress_bar": True, "end_card": "Bye"}]}))
     assert davnai.main(["render", str(plan)]) == 0
-    assert davnai.main(["render", str(plan)]) == 0
+    assert davnai.main(["render", str(plan)]) == 0  # nothing changed: kept, not made again
+    assert not (folder / "s1_v2_preview.mp4").exists()
+    assert davnai.main(["render", str(plan), "--force"]) == 0
     assert (folder / "s1_v1_preview.mp4").exists() and (folder / "s1_v2_preview.mp4").exists()
     assert davnai.main(["render", str(plan), "--final"]) == 0
     info = davnai.probe(folder / "s1_final.mp4")
@@ -287,3 +290,46 @@ def test_words_behind_put_the_person_back_on_top(tmp_path, monkeypatch):
     frame = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", "1.5", "-i", str(out), "-frames:v", "1", "-vf", "crop=4:4:88:150", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
     assert frame[0] > 200 and frame[2] < 60  # the person (red) is in front of the words
     assert davnai.probe(out)["audio"]
+
+
+def test_style_sits_under_the_plan(monkeypatch, tmp_path):
+    monkeypatch.setattr(davnai, "STYLE_FILE", tmp_path / "style.json")
+    assert davnai.main(["style", "--set", "caption_words=3", "look=warm", "--note", "likes warm"]) == 0
+    assert davnai.with_style({"look": "cool"}) == {"caption_words": 3, "look": "cool"}
+    assert davnai.load_style()["notes"][-1].endswith("likes warm")
+    assert davnai.main(["style", "--unset", "look"]) == 0
+    assert davnai.load_style()["preferences"] == {"caption_words": 3}
+
+
+def test_unchanged_outputs_have_the_same_fingerprint(tmp_path):
+    a = davnai.output_digest({"name": "s", "keep": [[1, 2]]}, {}, tmp_path, False)
+    assert a == davnai.output_digest({"keep": [[1, 2]], "name": "s"}, {}, tmp_path, False)
+    assert a != davnai.output_digest({"name": "s", "keep": [[1, 3]]}, {}, tmp_path, False)
+    assert a != davnai.output_digest({"name": "s", "keep": [[1, 2]]}, {}, tmp_path, True)
+
+
+def test_review_notes_come_back_as_lines():
+    text = "\n".join(davnai.notes_text({"name": "s", "version": 2, "marks": [{"kind": "cut", "time": 65.2, "line": 14, "said": "so um", "note": ""}, {"kind": "change", "time": None, "note": "warmer"}]}))
+    assert "[cut] 1:05 line 14 (\"so um\"): (no note)" in text and "[change] whole video: warmer" in text
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_many_cuts_never_drift(tmp_path, monkeypatch):
+    monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    monkeypatch.setattr(davnai, "STYLE_FILE", tmp_path / "style.json")
+    video = tmp_path / "long.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=29.97", "-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "40", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(video)], check=True)
+    words, t = [], 0.3
+    while t < 39:
+        words.append([f"w{len(words)}" + ("." if len(words) % 7 == 6 else ""), round(t, 3), round(t + 0.27, 3)])
+        t += 0.33 + (0.85 if len(words) % 5 == 0 else 0)
+    folder = davnai.workdir(video)
+    st = video.stat()
+    lines = davnai.split_lines(words)
+    (folder / "transcript.json").write_text(json.dumps({"stamp": {"size": st.st_size, "mtime": int(st.st_mtime)}, "seconds": 40, "lines": lines}))
+    plan = folder / "plan.json"
+    plan.write_text(json.dumps({"source": "../long.mp4", "outputs": [{"name": "d", "aspect": "source", "keep": [[i, i + 1] for i in range(1, len(lines) - 2, 3)], "tighten": True, "speed": 1.1, "checks": False}]}))
+    assert davnai.main(["render", str(plan)]) == 0
+    timing = json.loads((folder / "d_v1.timing.json").read_text())
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=duration", "-of", "csv=p=0", str(folder / "d_v1_preview.mp4")], capture_output=True, text=True).stdout
+    assert abs(float(out) - timing["main"]) < 0.02
