@@ -28,6 +28,7 @@ import argparse
 import base64
 import concurrent.futures
 import json
+import math
 import os
 import re
 import shutil
@@ -38,7 +39,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -1263,9 +1264,21 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         part, label = beat_pulse(label, beats_of(resolve(cfg["music"]), main_len), w, h, fps, float(cfg.get("beat_amount", 0.04)))
         graph += part
     behind = behind_windows(cfg, words, main_len)
-    if any(it.get("slice") for _, _, it in behind):  # sliced words land on the music's beats
+    if any(it.get("slice") or it.get("type") == "cycle" for _, _, it in behind):  # sliced words and picture changes land on the beat
         song = beats_of(resolve(cfg["music"]), main_len) if cfg.get("music") else []
-        behind = [(a, b, {**it, "_beats": song}) if it.get("slice") else (a, b, it) for a, b, it in behind]
+        behind = [(a, b, {**it, "_beats": song}) if it.get("slice") or it.get("type") == "cycle" else (a, b, it) for a, b, it in behind]
+        behind = [(a, b, {**it, "_images": cycle_images(it, resolve)}) if it.get("type") == "cycle" else (a, b, it) for a, b, it in behind]
+    for k, it in enumerate(cfg.get("fx") or []):
+        if it.get("type") == "cycle" and not it.get("behind", True):  # pictures over the whole frame: no cut-out needed
+            a, b = fx_window(it, words, main_len)
+            song = beats_of(resolve(cfg["music"]), main_len) if cfg.get("music") else []
+            reel = folder / f"{name}_v{version}_cycle{k}.mp4"
+            cycle_reel(reel, cycle_images(it, resolve), cycle_times(a, b, song, float(it.get("every", 0.4))), b, w, h)
+            ci = add_input("-itsoffset", f"{a:.3f}", "-i", str(reel))
+            alpha = min(1.0, float(it.get("opacity", 1.0)))
+            graph.append(f"[{ci}:v]format=rgba,colorchannelmixer=aa={alpha:.2f}[cy{k}]")
+            graph.append(f"[{label}][cy{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[vcy{k}]")
+            label = f"vcy{k}"
     compares = [(*fx_window(it, words, main_len), it) for it in cfg.get("fx") or [] if it.get("type") == "compare"]
     if compares:  # before / after: the cut picture, before looks and effects, on the left half
         part, label = compare_graph(label, raw_label, compares, w, h)
@@ -1416,7 +1429,12 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
     for wd in words:
         win = windows.setdefault(int(wd[3]), [wd[1], wd[2]])
         win[0], win[1] = min(win[0], wd[1]), max(win[1], wd[2])
-    timing = {"offset": intro_len, "main": main_len, "face": [round(v, 1) for v in face_out] if face_out else None, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
+    caps_band = None
+    if cfg.get("captions"):
+        caps_ = brand.get("captions") or {}
+        look_ = {**DEFAULT_STYLE, **(caps_.get("look") or {})}
+        caps_band = [round(v, 1) for v in caption_band(cfg.get("caption_position") or caps_.get("position") or look_.get("place") or "bottom", w, h, look_, caps_.get("margins") or DEFAULT_MARGINS)]
+    timing = {"offset": intro_len, "main": main_len, "face": [round(v, 1) for v in face_out] if face_out else None, "captions": caps_band, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
     (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
     if behind:
         apply_behind(out, behind, brand, w, h, final, folder, f"{name}_v{version}", intro_len, face_out)
@@ -1430,7 +1448,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
 
 MOTION_DIR = BRAND_DIR.parent / "motion"
 NO_TRACKING = {"HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1"}  # the person's renders stay private
-MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "feed", "flythrough", "block", "custom")
+MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "feed", "flythrough", "glass", "carousel", "block", "custom")
 
 
 def hyperframes_cmd() -> list[str]:
@@ -1469,24 +1487,29 @@ def brand_look(brand: dict) -> dict:
     }
 
 
-SPOT_TOPS = {"top": (0.12, 0.08), "upper": (0.24, 0.24), "middle": (0.42, 0.42), "lower": (0.56, 0.66), "bottom": (0.62, 0.78)}
-DEFAULT_SPOT = {"title": "top", "counter": "upper", "list": "upper", "chart": "upper"}
+SPOT_TOPS = {"top": (0.12, 0.08), "upper": (0.24, 0.24), "middle": (0.42, 0.42), "lower": (0.56, 0.66), "bottom": (0.62, 0.78), "foot": (0.72, 0.8)}
+DEFAULT_SPOT = {"title": "top", "counter": "upper", "list": "upper", "chart": "upper", "glass": "upper", "carousel": "top"}
 
 
-def keep_off_face(item: dict, face, w: int, h: int) -> dict:
-    """A graphic without a chosen position moves to the nearest place that doesn't cover the face (pure)."""
+def keep_off_face(item: dict, face, w: int, h: int, captions=None) -> dict:
+    """A graphic without a chosen position moves to the nearest place that covers neither the face nor the captions,
+    or at least not the face (pure)."""
     kind = item.get("type")
-    if not face or item.get("position") or kind not in (*DEFAULT_SPOT, "lower_third"):
+    if (not face and not captions) or item.get("position") or kind not in (*DEFAULT_SPOT, "lower_third"):
         return item
     tall = h > w
     default = DEFAULT_SPOT.get(kind) or ("upper" if tall else "lower")
-    height = {"title": 0.16, "lower_third": 0.12}.get(kind, 0.3) * h
-    top, bottom = face[1] - face[3] * 0.15, face[1] + face[3] * 1.15
-    order = [default] + [p for p in ("top", "upper", "lower", "bottom", "middle") if p != default]
-    for place in order:
+    height = {"title": 0.16, "lower_third": 0.12, "carousel": 0.25 if tall else 0.3}.get(kind, 0.3) * h
+    zones = ([(face[1] - face[3] * 0.15, face[1] + face[3] * 1.15)] if face else []) + ([tuple(captions)] if captions else [])
+    order = [default] + [p for p in ("top", "upper", "lower", "bottom", "middle", "foot") if p != default]
+
+    def clear(place: str, blocked: list) -> bool:
         a = SPOT_TOPS[place][0 if tall else 1] * h
-        if a + height < top or a > bottom:
-            return item if place == default else {**item, "position": place}
+        return all(a + height < top or a > bottom for top, bottom in blocked)
+    for blocked in (zones, zones[:1] if face else []):
+        for place in order:
+            if blocked and clear(place, blocked):
+                return item if place == default else {**item, "position": place}
     return item
 
 
@@ -1513,7 +1536,7 @@ def item_window(item: dict, timing: dict, total: float) -> tuple[float, float]:
 
 def spot(position: str, w: int, h: int) -> str:
     tall = h > w
-    top = {"top": 0.12 if tall else 0.08, "upper": 0.24, "middle": 0.42, "lower": 0.56 if tall else 0.66, "bottom": 0.62 if tall else 0.78}.get(position, 0.12)
+    top = {p: v[0 if tall else 1] for p, v in SPOT_TOPS.items()}.get(position, 0.12 if tall else 0.08)
     return f"top:{round(h * top)}px;"
 
 
@@ -1624,6 +1647,10 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
         return motion_feed(mid, attrs, item, t0, dur, w, h, look)
     if kind == "flythrough":
         return motion_flythrough(mid, attrs, item, t0, dur, w, h)
+    if kind == "glass":
+        return motion_glass(mid, attrs, item, t0, dur, w, h, pos)
+    if kind == "carousel":
+        return motion_carousel(mid, attrs, item, t0, dur, w, h, pos, plan_dir, project)
     if kind == "block":
         return motion_block(mid, item, t0, dur, w, h, plan_dir, project)
     if kind == "custom":
@@ -1658,6 +1685,52 @@ def motion_feed(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int,
           f'.fromTo("#{mid} .heart",{{scale:1}},{{scale:1.6,color:"#FF3B5C",yoyo:true,repeat:1,duration:0.18}},{t0 + 1.1:.3f})'
           f'.to("#{mid} .feed-col",{{scale:{1 / scale:.3f},y:0,duration:0.45,ease:"power2.in"}},{out_at:.3f})'
           f'.to("#{mid}",{{autoAlpha:0,duration:0.15}},{out_at + 0.32:.3f});')
+    return html, js
+
+
+def motion_glass(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int, h: int, pos: str) -> tuple[str, str]:
+    """A frosted-glass panel over the video (the picture shows through, blurred): a title, a line or a list, an icon."""
+    u = min(w, h) / 100
+    rows = "".join(f'<div class="gl-row"><span class="gl-dot"></span>{esc(x)}</div>' for x in item.get("items") or [])
+    body = (f'<div class="gl-icon">{esc(item["icon"])}</div>' if item.get("icon") else "") + \
+           (f'<div class="gl-title">{esc(item["title"])}</div>' if item.get("title") else "") + \
+           (f'<div class="gl-text">{esc(item["text"])}</div>' if item.get("text") else "") + rows
+    if not body:
+        raise Problem("A glass panel needs a \"title\", \"text\" or \"items\".")
+    html = (f'<div {attrs} class="g" style="{spot(pos or ("upper" if h > w else "middle"), w, h)}left:{round(8 * u)}px;right:{round(8 * u)}px">'
+            f'<div class="glass">{body}<div class="gl-sheen"></div></div></div>')
+    out_at = max(t0 + 0.6, t0 + dur - 0.35)
+    js = (f'tl.from("#{mid} .glass",{{y:{round(6 * u)},scale:0.92,autoAlpha:0,duration:0.5,ease:"power3.out"}},{t0:.3f})'
+          f'.fromTo("#{mid} .gl-sheen",{{x:"-120%"}},{{x:"220%",duration:1.1,ease:"power2.inOut"}},{t0 + 0.3:.3f})'
+          f'.from("#{mid} .gl-row",{{x:-{round(6 * u)},autoAlpha:0,duration:0.3,stagger:0.15}},{t0 + 0.35:.3f})'
+          f'.to("#{mid} .glass",{{autoAlpha:0,y:-{round(3 * u)},duration:0.3}},{out_at:.3f});')
+    return html, js
+
+
+def motion_carousel(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int, h: int, pos: str, plan_dir: Path, project: Path) -> tuple[str, str]:
+    """Pictures on a slowly turning 3D ring over the video (products, screenshots, places, faces of guests)."""
+    pics = []
+    for i, x in enumerate(item.get("images") or []):
+        src = Path(str(x)).expanduser()
+        src = src if src.is_absolute() else (plan_dir / src).resolve()
+        if not src.exists():
+            raise Problem(f"Carousel: can't find {src}.")
+        name = f"{mid}_{i}{src.suffix.lower()}"
+        shutil.copy2(src, project / name)
+        pics.append(name)
+    if len(pics) < 3:
+        raise Problem("A carousel needs at least 3 \"images\".")
+    u = min(w, h) / 100
+    cw = round(w * (0.3 if h > w else 0.18))
+    radius = round(cw / (2 * math.tan(math.pi / len(pics))) * 1.15)
+    cards = "".join(f'<div class="car-card" style="width:{cw}px;height:{round(cw * 1.25)}px;margin-left:-{cw // 2}px;'
+                    f'transform:rotateY({360 / len(pics) * i:.2f}deg) translateZ({radius}px);background-image:url({esc(n)})"></div>' for i, n in enumerate(pics))
+    html = (f'<div {attrs} class="g car" style="{spot(pos or "top", w, h)}left:0;right:0;height:{round(cw * 1.4)}px">'
+            f'<div class="car-ring" style="transform:translateZ(-{radius}px)">{cards}</div></div>')
+    turns = float(item.get("turns", 0.5))
+    js = (f'tl.from("#{mid}",{{autoAlpha:0,scale:0.7,duration:0.45,ease:"back.out(1.6)"}},{t0:.3f})'
+          f'.fromTo("#{mid} .car-ring",{{rotationY:0}},{{rotationY:{-360 * turns:.1f},duration:{dur:.3f},ease:"none"}},{t0:.3f})'
+          f'.to("#{mid}",{{autoAlpha:0,duration:0.3}},{max(t0 + 0.5, t0 + dur - 0.3):.3f});')
     return html, js
 
 
@@ -1787,6 +1860,18 @@ video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
 .fly-pic{{background-size:cover;background-position:center;border-radius:{round(2.5 * u)}px;box-shadow:0 {round(2 * u)}px {round(6 * u)}px rgba(0,0,0,.6);border:{max(2, round(0.5 * u))}px solid {t}}}
 .fly-t{{margin-top:{round(2.5 * u)}px;font-size:{round(5.5 * u)}px;text-align:center}}
 .fly-n{{color:{a}}}
+.glass{{position:relative;overflow:hidden;padding:{round(4 * u)}px {round(5 * u)}px;border-radius:{round(4 * u)}px;background:rgba(255,255,255,.14);
+  -webkit-backdrop-filter:blur({round(2.4 * u)}px) saturate(1.5);backdrop-filter:blur({round(2.4 * u)}px) saturate(1.5);
+  border:1px solid rgba(255,255,255,.35);box-shadow:0 {round(2 * u)}px {round(6 * u)}px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.5);color:#fff}}
+.gl-sheen{{position:absolute;top:0;bottom:0;left:0;width:40%;background:linear-gradient(105deg,transparent,rgba(255,255,255,.35),transparent);pointer-events:none}}
+.gl-icon{{font-size:{round(9 * u)}px;line-height:1;margin-bottom:{round(1.5 * u)}px}}
+.gl-title{{font-size:{round(6.5 * u)}px;font-weight:900;line-height:1.1}}
+.gl-text{{font-size:{round(4.4 * u)}px;font-weight:600;margin-top:{round(1.2 * u)}px;opacity:.92}}
+.gl-row{{font-size:{round(4.4 * u)}px;font-weight:700;margin-top:{round(1.4 * u)}px;display:flex;align-items:center;gap:{round(2 * u)}px}}
+.gl-dot{{width:{round(2 * u)}px;height:{round(2 * u)}px;border-radius:50%;background:{a};flex:none}}
+.car{{perspective:{round(w * 2.2)}px}}
+.car-ring{{position:absolute;left:50%;top:0;width:0;height:100%;transform-style:preserve-3d}}
+.car-card{{position:absolute;top:0;background-size:cover;background-position:center;border-radius:{round(2 * u)}px;border:{max(2, round(0.5 * u))}px solid #fff;box-shadow:0 {round(u)}px {round(4 * u)}px rgba(0,0,0,.45);backface-visibility:visible}}
 """ + THEME_CSS.get(look.get("theme") or "", "").format(s=round(1.2 * u), t=round(9.5 * u), h=max(2, round(0.4 * u)), g=round(2.5 * u), a=a, p=p)
 
 
@@ -1827,7 +1912,7 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
         raise Problem("GSAP is missing. Run: python davnai.py setup --motion")
     total = probe(out)["seconds"]
     look = brand_look(brand)
-    items = [keep_off_face(item, timing.get("face"), w, h) for item in cfg["motion"]]
+    items = [keep_off_face(item, timing.get("face"), w, h, timing.get("captions")) for item in cfg["motion"]]
     for k, item in enumerate(items):  # a flythrough takes as long as its chapters need, unless told
         if item.get("type") == "flythrough" and "seconds" not in item and not item.get("lines"):
             items[k] = {**item, "seconds": round(0.95 * len(item.get("chapters") or []) + 0.7, 2)}
@@ -2047,7 +2132,24 @@ def relight_layers(k: int, item: dict, label: str, person: str, a: float, b: flo
 
 # ---------------------------------------------------------------- signature effects (timed by transcript lines)
 
-FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight", "poster", "compare")
+FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight", "poster", "compare", "cycle", "custom")
+BLOCKED_FILTERS = ("movie", "amovie", "sendcmd", "asendcmd", "zmq", "azmq")  # custom effects may not read files or take commands
+
+
+def check_custom_filter(chain: str, w: int, h: int) -> str:
+    """A custom effect is one ffmpeg filter chain (no extra inputs or outputs); it's tried on a blank frame first."""
+    chain = str(chain or "").strip()
+    if not chain:
+        raise Problem("A custom effect needs \"filter\": an ffmpeg filter chain, e.g. \"hue=h=90*t,eq=contrast=1.3\".")
+    if any(c in chain for c in "[];"):
+        raise Problem(f"Custom effect \"{chain}\": use one chain of filters joined by commas (no [labels] or ;).")
+    names = {re.split(r"[=@]", part.strip(), maxsplit=1)[0] for part in re.split(r"(?<!\\),", chain)}
+    if names & set(BLOCKED_FILTERS):
+        raise Problem(f"Custom effect: {', '.join(sorted(names & set(BLOCKED_FILTERS)))} can't be used (it reads files or takes commands).")
+    proc = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", f"testsrc2=s={w}x{h}:d=0.2:r=10", "-vf", f"{chain},scale={w}:{h},format=yuv420p", "-f", "null", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise Problem(f"Custom effect \"{chain}\" doesn't work in ffmpeg:\n" + "\n".join(proc.stderr.strip().splitlines()[-4:]))
+    return chain
 
 
 def compare_graph(label: str, raw: str, items: list[tuple[float, float, dict]], w: int, h: int) -> tuple[list[str], str]:
@@ -2114,6 +2216,8 @@ def fx_chain(kind: str, w: int, h: int, item: dict) -> str:
         return f"curves=preset=vintage,eq=saturation=1.25:contrast=1.08,rgbashift=rh=-{u}:bh={u},noise=alls={round(16 * strength)}:allf=t,drawgrid=w=0:h={max(3, u * 2)}:t=1:c=black@0.22"
     if kind == "grain":
         return f"noise=alls={round(12 * strength)}:allf=t"
+    if kind == "custom":  # the AI's own filters, kept to the frame size
+        return f"{check_custom_filter(item.get('filter'), w, h)},scale={w}:{h}"
     if kind == "relight":  # golden hour: no cut-out needed
         return f"colorbalance=rs={0.12 * strength:.2f}:gs={0.03 * strength:.2f}:bs=-{0.12 * strength:.2f}:rm={0.08 * strength:.2f}:bm=-{0.08 * strength:.2f},eq=brightness=0.03:saturation=1.12,vignette=PI/5"
     raise Problem(f"Unknown effect '{kind}'. Use: {', '.join(FX_TYPES)}.")
@@ -2124,7 +2228,7 @@ def fx_graph(label: str, cfg: dict, words: list[list], total: float, w: int, h: 
     graph = []
     for k, item in enumerate(cfg.get("fx") or []):
         kind = item.get("type")
-        if needs_cutout(item) or kind == "compare":
+        if needs_cutout(item) or kind in ("compare", "cycle"):
             continue  # cut-out effects come after the main render; before/after is laid on later
         a, b = fx_window(item, words, total)
         if kind == "light_leak":
@@ -2191,12 +2295,42 @@ def split_graph(label: str, cfg: dict, w: int, h: int, fps: float, total: float,
 def needs_cutout(item: dict) -> bool:
     """Effects done after the main render, with the person cut out: words behind, poster, relighting (not golden hour)."""
     kind = item.get("type")
-    return kind in ("behind", "poster") or (kind == "relight" and item.get("light", "spotlight") != "golden_hour")
+    return kind in ("behind", "poster") or (kind == "cycle" and item.get("behind", True)) or (kind == "relight" and item.get("light", "spotlight") != "golden_hour")
 
 
 def behind_windows(cfg: dict, words: list[list], total: float) -> list[tuple[float, float, dict]]:
     """Effects that need the person cut out, with their windows."""
     return [(*fx_window(item, words, total), item) for item in cfg.get("fx") or [] if needs_cutout(item)]
+
+
+def cycle_times(a: float, b: float, beats: list[float], every: float = 0.4) -> list[float]:
+    """When the picture changes: on each beat in the window, else every `every` seconds (pure)."""
+    near = [t for t in beats if a < t < b - 0.1]
+    if len(near) >= 2:
+        return [a] + near
+    every = max(0.12, every)
+    return [a + i * every for i in range(max(1, int((b - a) / every + 0.999)))]
+
+
+def cycle_images(item: dict, resolve) -> list[Path]:
+    pics = [resolve(str(x)) for x in item.get("images") or []]
+    if len(pics) < 2:
+        raise Problem("A picture cycle needs at least 2 \"images\" (the person's own, stock, or pictures you made).")
+    missing = [str(p) for p in pics if not p.exists()]
+    if missing:
+        raise Problem(f"Picture cycle: can't find {', '.join(missing)}.")
+    return pics
+
+
+def cycle_reel(out: Path, pics: list[Path], times: list[float], end: float, w: int, h: int) -> None:
+    """A short clip of the pictures, each held until the next change (the pictures repeat if there are more changes)."""
+    args, parts = [], []
+    for i, t in enumerate(times):
+        d = (times[i + 1] if i + 1 < len(times) else end) - t
+        args += ["-loop", "1", "-framerate", "30", "-t", f"{max(d, 0.04):.3f}", "-i", str(pics[i % len(pics)])]
+        parts.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps=30,format=yuv420p[c{i}]")
+    graph = ";".join(parts) + ";" + "".join(f"[c{i}]" for i in range(len(times))) + f"concat=n={len(times)}:v=1:a=0[v]"
+    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args, "-filter_complex", graph, "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)])
 
 
 def slice_times(a: float, b: float, n: int, beats: list[float]) -> list[float]:
@@ -2332,6 +2466,19 @@ def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict,
                 chain.append(f"[{bi}:v]format=yuv420p,fade=t=in:st=0:d=0.12:c=white,setpts=PTS-STARTPTS+{a:.3f}/TB[pb{k}]")
                 chain.append(f"[{label}][pb{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[pg{k}]")
                 label = f"pg{k}"
+        for k, (a, b, person) in enumerate(people):  # picture cycles: the pictures replace the room, the person stays in front
+            item = items[k][2]
+            if item.get("type") == "cycle":
+                reel = work / f"cycle{k}.mp4"
+                cycle_reel(reel, item["_images"], [t + offset for t in cycle_times(items[k][0], items[k][1], item.get("_beats") or [], float(item.get("every", 0.4)))], b, w, h)
+                inputs += ["-itsoffset", f"{a:.3f}", "-i", str(reel)]
+                ci = len(inputs_of(inputs)) - 1
+                chain.append(f"[{label}][{ci}:v]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[cg{k}]")
+                label = f"cg{k}"
+        for k, (a, b, person) in enumerate(people):
+            if items[k][2].get("type") == "cycle":
+                chain.append(f"[{label}][{k + 1}:v]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[cp{k}]")
+                label = f"cp{k}"
         if any(item.get("type", "behind") in ("behind", "poster") for _, _, item in items):
             chain.append(f"[{label}]ass={ass.name}:fontsdir=fonts[bt]")
             label = "bt"

@@ -461,3 +461,37 @@ def test_poster_title_fits_above_the_face():
     lines = 1 if single else 2
     assert 48 + size * lines <= 300 + 140 * 0.25 + 1
     assert davnai.poster_size(["GO"], 540, 960, 48)[1]
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_custom_effects_are_checked():
+    assert davnai.fx_chain("custom", 180, 320, {"filter": "hue=h=90*t,eq=contrast=1.3"}).endswith("scale=180:320")
+    for bad in ("", "[0:v]hue=h=9[x]", "movie=secret.mp4", "notafilter=1"):
+        with pytest.raises(davnai.Problem):
+            davnai.check_custom_filter(bad, 180, 320)
+
+
+def test_picture_cycles_change_on_the_beat():
+    assert davnai.cycle_times(1.0, 3.0, [1.5, 2.0, 2.5]) == [1.0, 1.5, 2.0, 2.5]
+    assert davnai.cycle_times(0.0, 1.0, [], 0.4) == pytest.approx([0.0, 0.4, 0.8])
+    assert davnai.needs_cutout({"type": "cycle"}) and not davnai.needs_cutout({"type": "cycle", "behind": False})
+    with pytest.raises(davnai.Problem):
+        davnai.cycle_images({"images": ["one.jpg"]}, Path)
+
+
+def test_graphics_avoid_the_face_and_the_captions():
+    face, captions = (202, 228, 136, 136), (528, 634)
+    moved = davnai.keep_off_face({"type": "carousel"}, face, 540, 960, captions)
+    top = davnai.SPOT_TOPS[moved["position"]][0] * 960
+    assert top > 634 or top + 0.25 * 960 < 528
+    html, js = davnai.motion_item(0, {"type": "glass", "title": "Hi", "items": ["a", "b"]}, 0.0, 2.0, 540, 960, davnai.brand_look({}), Path("."), Path("."))
+    assert html.count("gl-row") == 2 and "gl-sheen" in js
+
+
+def test_carousel_copies_its_pictures(tmp_path):
+    for i in range(3):
+        (tmp_path / f"{i}.jpg").write_bytes(b"x")
+    project = tmp_path / "p"
+    project.mkdir()
+    html, _ = davnai.motion_item(2, {"type": "carousel", "images": ["0.jpg", "1.jpg", "2.jpg"]}, 0.0, 3.0, 540, 960, davnai.brand_look({}), tmp_path, project)
+    assert html.count("car-card") == 3 and (project / "m2_0.jpg").exists()
