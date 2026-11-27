@@ -1,0 +1,12 @@
+{
+  "name": "davnai",
+  "description": "Davnai's skills for editing videos with your own AI and posting them with Davnai.",
+  "owner": { "name": "Davnai", "email": "support@davnai.com" },
+  "plugins": [
+    {
+      "name": "davnai",
+      "source": "./",
+      "description": "Edit videos on your computer the Davnai way, then post everywhere with Davnai."
+    }
+  ]
+}

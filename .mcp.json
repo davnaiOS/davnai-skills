@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "davnai": {
+      "type": "http",
+      "url": "https://davnai.com/mcp"
+    }
+  }
+}
