@@ -1,6 +1,6 @@
 # Shorts, Reels and TikToks
 
-Pick the moments from the numbered transcript, then one output per Short.
+Pick the moments from the numbered transcript, then one output per Short. Then plan each Short's visuals with `reference/visual-plan.md`: beats every 1 to 4 seconds, scenes for the key ideas, something changing every 1 to 2 seconds.
 
 - **Length:** 20 to 45 seconds unless the person says otherwise. Each line shows its seconds; add them up.
 - **Hook first.** The first line must make someone stop: a bold claim, a question, a surprising number, a strong opinion. If the best hook is later in the clip, start there or move that line to the front (`keep` plays ranges in the order listed).

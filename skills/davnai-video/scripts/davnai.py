@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -283,6 +283,20 @@ def load_brand() -> dict:
 # ---------------------------------------------------------------- transcript
 
 
+def join_pieces(words: list[list]) -> list[list]:
+    """Whisper sometimes splits a word into pieces ("$7" ",000", "8" "%", "non" "-registered", "it" "'s"): put them back
+    together so captions read "$7,000", "8%" and "non-registered" (pure)."""
+    out: list[list] = []
+    for w in words:
+        text = str(w[0])
+        piece = re.match(r"^(,\d|%|-[A-Za-z]|'(s|t|re|ll|ve|m|d)\b)", text, re.I) is not None
+        if out and (piece or out[-1][0] == "$"):
+            out[-1] = [out[-1][0] + text, out[-1][1], w[2], *w[3:]]
+        else:
+            out.append(list(w))
+    return out
+
+
 def split_lines(words: list[list]) -> list[dict]:
     """Words [[text, start, end], ...] into short numbered lines (a sentence, a pause, or at most 16 words)."""
     lines, current = [], []
@@ -369,7 +383,7 @@ def cmd_transcribe(args) -> None:
                 words.append([text, round(w.start, 3), round(w.end, 3)])
     if not words:
         raise Problem("No speech was found in this file.")
-    lines = split_lines(words)
+    lines = split_lines(join_pieces(words))
     path.write_text(json.dumps({"source": source.name, "stamp": stamp, "seconds": info["seconds"], "language": details.language, "lines": lines}), encoding="utf-8")
     say(f"Transcript of {source.name} ({len(lines)} lines):")
     print_lines(lines, args.lines)
@@ -793,9 +807,11 @@ def face_check(path: Path, cfg: dict, brand: dict, info: dict) -> str:
     w, h = info["width"], info["height"]
     tall = h > w
     place = cfg.get("caption_position") or caps.get("position") or look.get("place") or "bottom"
-    size = float(look.get("size", 0.075)) * min(w, h)
+    size = float(cfg.get("caption_size") or look.get("size", 0.075)) * min(w, h)
     m = margins["tall" if tall else "wide"]
-    if place == "top":
+    if cfg.get("caption_y"):  # the plan put the captions' bottom edge at this height
+        band = (float(cfg["caption_y"]) * h - size * 2.6, float(cfg["caption_y"]) * h)
+    elif place == "top":
         band = (m["top"] * h, m["top"] * h + size * 2.6)
     elif place == "middle":
         band = (h / 2 - size * 1.3, h / 2 + size * 1.3)
@@ -891,6 +907,21 @@ class Timeline:
         return sorted(out, key=lambda w: w[1])
 
 
+def word_span(words: list[list], frm, to=None) -> tuple[float, float] | None:
+    """Where "from": [line, word] .. "to": [line, word] is in the edited video (word numbers start at 1; "to" defaults
+    to the end of the from line), or None if those words were cut (pure)."""
+    def at(spec, last):
+        line, n = int(spec[0]), int(spec[1])
+        in_line = [w for w in words if w[3] == line]
+        if not in_line:
+            return None
+        k = min(max(1, n), len(in_line)) - 1
+        return in_line[k][2] if last else in_line[k][1]
+    start = at(frm, False)
+    end = at(to, True) if to else (max((w[2] for w in words if w[3] == int(frm[0])), default=None))
+    return (start, end) if start is not None and end is not None and end > start else None
+
+
 def line_window(words: list[list], first: int, last: int) -> tuple[float, float] | None:
     """Where lines first..last are in the edited video (from its words), or None if they were cut."""
     inside = [w for w in words if first <= w[3] <= last]
@@ -900,7 +931,8 @@ def line_window(words: list[list], first: int, last: int) -> tuple[float, float]
 def split_pieces(pieces: list[dict], cuts: list[float]) -> list[dict]:
     out = []
     for p in pieces:
-        points = sorted(c for c in cuts if p["s"] + 0.05 < c < p["e"] - 0.05)
+        points = sorted(c for c in cuts if p["s"] + 0.25 < c < p["e"] - 0.25)  # never a sliver: a 3-frame zoom change reads as a glitch
+        points = [c for i, c in enumerate(points) if i == 0 or c - points[i - 1] > 0.25]
         edges = [p["s"], *points, p["e"]]
         out += [{**p, "s": a, "e": b} for a, b in zip(edges, edges[1:])]
     return out
@@ -910,8 +942,15 @@ def apply_zooms(pieces: list[dict], cfg: dict, lines: list[dict]) -> list[dict]:
     zooms = []
     for z in cfg.get("zoom") or []:
         rng = z.get("lines") if isinstance(z, dict) else z
+        if isinstance(z, dict) and isinstance(z.get("from"), (list, tuple)):  # from a word to a word
+            fl = line_by_id(lines, z["from"][0])
+            tl_ = line_by_id(lines, (z.get("to") or [z["from"][0], len(fl["words"])])[0])
+            fw = fl["words"][min(max(1, int(z["from"][1])), len(fl["words"])) - 1]
+            tw = tl_["words"][min(max(1, int((z.get("to") or [0, len(tl_["words"])])[1])), len(tl_["words"])) - 1]
+            zooms.append((fw[1] - 0.05, tw[2] + 0.1, float(z.get("amount") or 1.18), z.get("style") or "punch"))
+            continue
         if not isinstance(rng, (list, tuple)) or len(rng) != 2:
-            raise Problem("Each zoom needs \"lines\": [first, last].")
+            raise Problem("Each zoom needs \"lines\": [first, last] (or \"from\": [line, word]).")
         a, b = line_by_id(lines, rng[0]), line_by_id(lines, rng[1])
         zooms.append((a["start"] - 0.05, b["end"] + 0.1, float((z.get("amount") if isinstance(z, dict) else None) or 1.18), (z.get("style") if isinstance(z, dict) else None) or "punch"))
     if cfg.get("auto_zoom"):
@@ -955,7 +994,7 @@ def ass_text(t: str) -> str:
     return t.replace("{", "(").replace("}", ")").replace("\\", "/").replace("\n", "\\N")
 
 
-def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words: list[list], duration: float, quiet: list[tuple[float, float]] = ()) -> bool:
+def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words: list[list], duration: float, quiet: list[tuple[float, float]] = (), hide: list[tuple[float, float]] = ()) -> bool:
     """Captions (Brand Kit style), the hook title and text callouts, all in one subtitle file."""
     caps = brand.get("captions") or {}
     look = {**DEFAULT_STYLE, **(caps.get("look") or {})}
@@ -964,10 +1003,12 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
     brand_colour = colours[0] if colours else look.get("accent") or "#FFD43B"
     tall = height > width
     short_side = min(width, height)
-    size = max(16, round(float(look.get("size", 0.075)) * short_side))
+    size = max(16, round(float(cfg.get("caption_size") or look.get("size", 0.075)) * short_side))
     m = margins["tall" if tall else "wide"]
     place = cfg.get("caption_position") or caps.get("position") or look.get("place") or "bottom"
     align, margin_v = {"top": (8, round(m["top"] * height)), "middle": (5, 0)}.get(place, (2, round(m["bottom"] * height)))
+    if cfg.get("caption_y"):  # the plan puts the captions' bottom edge at this height (0 top, 1 bottom), e.g. over the chest
+        align, margin_v = 2, round((1 - min(0.95, max(0.1, float(cfg["caption_y"])))) * height)
     family = caps.get("font_family") if caption_font_path(caps) else "Arial"
     theme = brand.get("theme") or {}
     title_family = theme.get("title_family") or family
@@ -1002,19 +1043,25 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
 
         for group in caption_groups(words, per_line):
             start, end = group[0][1], max(group[-1][2], group[0][1] + 0.3)
-            if any(a - 0.05 <= start <= b for a, b in quiet):
-                continue  # no captions while big words sit behind the person
-            intro = glow + ANIM_TAGS.get(anim, "")
+            # While an effect fills the frame (words behind, a poster, a studio effect) the captions keep going but move
+            # up out of its way, so the viewer never loses the words.
+            # While a scene shrinks the speaker into a card or window, the captions drop to the bottom of the frame
+            # (over the lower part of the video) so they never sit on the scene's headline.
+            low = any(a - 0.05 <= start <= b - 0.1 for a, b in hide)
+            busy = not low and any(a - 0.05 <= start <= b for a, b in quiet)
+            mv = round(m["top"] * height) if busy else round(height * 0.055) if low else 0
+            top_tag = "{\\an8}" if busy else "{\\an2}" if low else ""
+            intro = top_tag + glow + ANIM_TAGS.get(anim, "")
             if anim == "type":
                 for k, w in enumerate(group):
                     w_end = group[k + 1][1] if k + 1 < len(group) else end
-                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,0,,{glow}{' '.join(word_text(x, j == k) for j, x in enumerate(group[: k + 1]))}")
+                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,{mv},,{top_tag}{glow}{' '.join(word_text(x, j == k) for j, x in enumerate(group[: k + 1]))}")
             elif karaoke:
                 for k, w in enumerate(group):
                     w_end = group[k + 1][1] if k + 1 < len(group) else end
-                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,0,,{intro if k == 0 else glow}{' '.join(word_text(x, j == k) for j, x in enumerate(group))}")
+                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,{mv},,{intro if k == 0 else top_tag + glow}{' '.join(word_text(x, j == k) for j, x in enumerate(group))}")
             else:
-                events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Davnai,,0,0,0,,{intro}{' '.join(word_text(x, False) for x in group)}")
+                events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Davnai,,0,0,{mv},,{intro}{' '.join(word_text(x, False) for x in group)}")
     if cfg.get("hook_text"):
         seconds = float(cfg.get("hook_seconds", 3))
         events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(min(seconds, duration))},Hook,,0,0,0,,{ANIM_TAGS['pop']}{ass_text(str(cfg['hook_text']))}")
@@ -1042,7 +1089,8 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
 def end_card_ass(path: Path, width: int, height: int, text: str, brand: dict) -> None:
     caps = brand.get("captions") or {}
     family = (brand.get("theme") or {}).get("title_family") or (caps.get("font_family") if caption_font_path(caps) else "Arial")
-    size = round(min(width, height) * 0.08)
+    size = round(min(width, height) * 0.115)
+    text = text.upper() if len(text) <= 40 else text
     path.write_text("\n".join([
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "WrapStyle: 0", "",
         "[V4+ Styles]",
@@ -1096,6 +1144,11 @@ def fit(label_in: str, label_out: str, w: int, h: int, fps: float) -> str:
 
 
 AUDIO_FMT = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+CUT_FADE = 0.012  # seconds of fade at each cut: removes the click without being heard
+VOICE_CLEAN = "highpass=f=75,afftdn=nf=-32:tn=1,dynaudnorm=f=200:g=15:p=0.9:m=6,equalizer=f=250:t=q:w=1.2:g=-2,equalizer=f=4500:t=q:w=1.5:g=2,acompressor=threshold=-21dB:ratio=3:attack=6:release=140:makeup=2"
+VOICE_CLEAN_STRONG = "highpass=f=90,afftdn=nf=-26:tn=1,dynaudnorm=f=200:g=15:p=0.9:m=6,equalizer=f=250:t=q:w=1.2:g=-3,equalizer=f=4500:t=q:w=1.5:g=2.5,acompressor=threshold=-22dB:ratio=3.5:attack=5:release=120:makeup=2"
+LIMITER = "alimiter=limit=0.89:attack=4:release=60:level=disabled"  # never louder than -1 dB: no distortion
+DUCK = "sidechaincompress=threshold=0.02:ratio=10:attack=15:release=420:makeup=1"  # music dips under speech
 
 
 def zoom_filter(z: float, style: str, src_w: int, src_h: int, focus_x: float, fps: float) -> str:
@@ -1230,16 +1283,19 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
                 focus_x = better
             box = median_box(faces)
             face_out = face_to_output(box, info["width"], info["height"], w, h, focus_x, fill) if box else None
-        si = add_input("-i", str(source))
         tempo = f",atempo={speed:g}" if abs(speed - 1) > 0.001 else ""
         for k, p in enumerate(pieces):
-            # Each piece is shaped to the output first, so zooms work on the small frame (fast, little memory).
-            graph.append(f"[{si}:v]trim=start={p['s']:.4f}:end={p['e'] + 2 / fps:.4f},setpts=PTS-STARTPTS[pv{k}]")
+            # Each piece reads only its own seconds of the file (one input per piece), so many cuts in a long video
+            # never pile up frames in memory; and it's shaped to the output first, so zooms work on the small frame.
+            si = add_input("-ss", f"{p['s']:.4f}", "-t", f"{p['e'] - p['s'] + 2 / fps:.4f}", "-i", str(source))
+            graph.append(f"[{si}:v]setpts=PTS-STARTPTS[pv{k}]")
             graph += shape(f"pv{k}", f"ps{k}", info["width"], info["height"], w, h, focus_x, fps, fill)
             z = zoom_filter(p.get("z", 1.0), p.get("zs", "punch"), w, h, 0.5, fps)
             graph.append(f"[ps{k}]{z}setpts=(PTS-STARTPTS)/{speed:g},fps={fps:g},tpad=stop_mode=clone:stop=3,trim=end_frame={p['frames']},setpts=PTS-STARTPTS,setsar=1[v{k}]")
             if info["audio"]:
-                graph.append(f"[{si}:a]atrim=start={p['s']:.4f}:end={p['e']:.4f},asetpts=PTS-STARTPTS{tempo},{AUDIO_FMT},apad,atrim=end_sample={round(p['frames'] / fps * 48000)}[a{k}]")
+                piece_len = (p["e"] - p["s"]) / speed
+                fades = f",afade=t=in:d={CUT_FADE},afade=t=out:st={max(0.0, piece_len - CUT_FADE):.4f}:d={CUT_FADE}" if piece_len > CUT_FADE * 4 else ""  # no pop at the cut
+                graph.append(f"[{si}:a]atrim=end={p['e'] - p['s']:.4f},asetpts=PTS-STARTPTS{tempo},{AUDIO_FMT}{fades},apad,atrim=end_sample={round(p['frames'] / fps * 48000)}[a{k}]")
             else:
                 graph.append(f"anullsrc=r=48000:cl=stereo,atrim=end_sample={round(p['frames'] / fps * 48000)},aformat=sample_fmts=fltp[a{k}]")
         index = {id(p): k for k, p in enumerate(pieces)}
@@ -1260,11 +1316,11 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             graph.append("".join(f"[gv{gi}][ga{gi}]" for gi in range(n)) + f"concat=n={n}:v=1:a=1[vcut][acut]")
         graph.append("[vcut]null[vbase]")
         audio_fx = []
-        if cfg.get("clean_audio"):
-            audio_fx.append("highpass=f=80,afftdn=nf=-25")
+        if cfg.get("voice", "clean") != "raw":  # rumble out, hiss down, even level, a touch of air: speech that sounds produced
+            audio_fx.append(VOICE_CLEAN_STRONG if cfg.get("clean_audio") or cfg.get("voice") == "strong" else VOICE_CLEAN)
         if cfg.get("loudness", True):
-            audio_fx.append("loudnorm=I=-14:TP=-1.5:LRA=11")
-        graph.append(f"[acut]{','.join(audio_fx) or 'anull'},{AUDIO_FMT}[abase]")
+            audio_fx.append("loudnorm=I=-14:TP=-1.5:LRA=9")
+        graph.append(f"[acut]{','.join(audio_fx + [LIMITER])},{AUDIO_FMT}[abase]")
         words = timeline.words(src_words)
         main_len = timeline.duration
         if joins_sound:
@@ -1368,7 +1424,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         if frame_filter:
             graph.append(f"[{label}]{frame_filter}[vframe]")
             label = "vframe"
-    if face_out and not cfg.get("caption_position"):  # captions move off the face (the plan can still choose)
+    if face_out and not cfg.get("caption_position") and not cfg.get("caption_y"):  # captions move off the face (the plan can still choose)
         caps_ = brand.get("captions") or {}
         look_ = {**DEFAULT_STYLE, **(caps_.get("look") or {})}
         preferred = caps_.get("position") or look_.get("place") or "bottom"
@@ -1376,11 +1432,18 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         if place != preferred:
             cfg = {**cfg, "caption_position": place}
     ass = folder / f"{name}_v{version}.ass"
-    if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, it in behind if it.get("type") in ("behind", "poster")] + [(a, b) for a, b, _ in studio]):
+    scenes = [(*fx_window(it, words, main_len), it) for it in cfg.get("motion") or [] if it.get("type") == "scene"]
+    hide = [(a, b) for a, b, it in scenes if it.get("title") or it.get("items") or it.get("number")]
+    # With later passes (cut-out effects, studio effects, graphics, scenes) the captions are burned in last, so they stay
+    # full size and sharp on top of everything, even when a scene shrinks the video into a card.
+    late_captions = bool(behind or studio or cfg.get("motion"))
+    has_captions = write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, it in behind if it.get("type") in ("behind", "poster")] + [(a, b) for a, b, _ in studio], hide)
+    if has_captions:
         fonts = folder / "fonts"
         fonts.mkdir(exist_ok=True)
-        graph.append(f"[{label}]ass={ass.name}:fontsdir=fonts[vcap]")
-        label = "vcap"
+        if not late_captions:
+            graph.append(f"[{label}]ass={ass.name}:fontsdir=fonts[vcap]")
+            label = "vcap"
     colours = [c.get("hex") for c in brand.get("colours") or [] if c.get("hex")]
     bar_colour = "0x" + (colours[0] if colours else "#FFD43B").lstrip("#")
     if cfg.get("progress_bar"):
@@ -1398,10 +1461,19 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
 
     alabel = "abase"
     mixes = []
-    if cfg.get("music"):
+    if cfg.get("music"):  # under the voice: it dips while you speak and comes back in the pauses, fades in and out
         mi = add_input("-stream_loop", "-1", "-i", str(resolve(cfg["music"])))
-        graph.append(f"[{mi}:a]{AUDIO_FMT},volume={float(cfg.get('music_volume', 0.12)):g},atrim=duration={main_len:.3f}[mus]")
-        mixes.append("[mus]")
+        fade_out = max(0.0, main_len - 1.5)
+        graph.append(f"[{mi}:a]{AUDIO_FMT},volume={float(cfg.get('music_volume', 0.2)):g},atrim=duration={main_len:.3f},afade=t=in:d=0.6,afade=t=out:st={fade_out:.3f}:d=1.5[mus]")
+        if cfg.get("duck", True):
+            graph.append(f"[{alabel}]asplit=2[vox][key]")
+            graph.append(f"[mus][key]{DUCK}[musd]")
+            alabel = "vox"
+            mixes.append("[musd]")
+        else:
+            mixes.append("[mus]")
+    if cfg.get("sounds", True):  # sound follows the picture: a whoosh on each zoom and effect, a hit on the big ones
+        auto_sounds += picture_sounds(cfg, words, main_len, [t for t, _ in auto_sounds])
     for k, item in enumerate(cfg.get("sfx") or []):
         line = item.get("line")
         window = line_window(words, int(line), int(line)) if line is not None else None
@@ -1417,7 +1489,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         graph.append(f"[{fi}:a]{AUDIO_FMT},volume=0.45,adelay={ms}|{ms}[ax{k}]")
         mixes.append(f"[ax{k}]")
     if mixes:
-        graph.append(f"[{alabel}]{''.join(mixes)}amix=inputs={len(mixes) + 1}:duration=first:normalize=0[amix]")
+        graph.append(f"[{alabel}]{''.join(mixes)}amix=inputs={len(mixes) + 1}:duration=first:normalize=0,{LIMITER}[amix]")
         alabel = "amix"
 
     tail_pieces = []
@@ -1473,7 +1545,13 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         caps_ = brand.get("captions") or {}
         look_ = {**DEFAULT_STYLE, **(caps_.get("look") or {})}
         caps_band = [round(v, 1) for v in caption_band(cfg.get("caption_position") or caps_.get("position") or look_.get("place") or "bottom", w, h, look_, caps_.get("margins") or DEFAULT_MARGINS)]
-    timing = {"offset": intro_len, "main": main_len, "face": [round(v, 1) for v in face_out] if face_out else None, "captions": caps_band, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
+        if cfg.get("caption_y"):
+            bottom = float(cfg["caption_y"]) * h
+            caps_band = [round(bottom - float(cfg.get("caption_size") or look_.get("size", 0.075)) * min(w, h) * 2.6, 1), round(bottom, 1)]
+    word_times: dict[str, list[list[float]]] = {}
+    for wd in words:
+        word_times.setdefault(str(int(wd[3])), []).append([round(wd[1] + intro_len, 3), round(wd[2] + intro_len, 3)])
+    timing = {"words": word_times, "offset": intro_len, "main": main_len, "face": [round(v, 1) for v in face_out] if face_out else None, "captions": caps_band, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
     (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
     if behind:
         apply_behind(out, behind, brand, w, h, final, folder, f"{name}_v{version}", intro_len, face_out)
@@ -1481,15 +1559,47 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         apply_studio(out, studio, brand, w, h, final, folder, f"{name}_v{version}", intro_len, resolve)
     if cfg.get("motion"):
         apply_motion(out, cfg, brand, timing, w, h, fps, final, folder, f"{name}_v{version}", plan_dir)
+    if has_captions and late_captions:
+        burn_captions(out, ass, intro_len, final, folder)
     checks = quality_checks(out, cfg, brand) if (final or main_len <= 180) and cfg.get("checks", True) else []
     return out, checks
+
+
+def shift_ass(text: str, seconds: float) -> str:
+    """Moves every caption later by `seconds` (for an intro before the main part) (pure)."""
+    if abs(seconds) < 0.001:
+        return text
+
+    def move(m):
+        def t(v):
+            h_, m_, s_ = v.split(":")
+            total = max(0.0, int(h_) * 3600 + int(m_) * 60 + float(s_) + seconds)
+            return ass_time(total)
+        return f"Dialogue: {m.group(1)},{t(m.group(2))},{t(m.group(3))},"
+    return re.sub(r"Dialogue: (\d+),([\d:.]+),([\d:.]+),", move, text)
+
+
+def burn_captions(out: Path, ass: Path, offset: float, final: bool, folder: Path) -> None:
+    """The captions, burned in as the last step so effects and scenes never shrink or blur them."""
+    late = ass.with_name(ass.stem + "_late.ass")
+    late.write_text(shift_ass(ass.read_text(encoding="utf-8"), offset), encoding="utf-8")
+    base = out.with_name(out.stem + "_nocaps" + out.suffix)
+    out.replace(base)
+    quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "18"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "27"]
+    try:
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", base.name, "-vf", f"ass={late.name}:fontsdir=fonts", "-map", "0:v", "-map", "0:a?", "-c:a", "copy", *quality, "-movflags", "+faststart", out.name], cwd=folder)
+        base.unlink(missing_ok=True)
+    except BaseException:
+        if not out.exists() and base.exists():
+            base.replace(out)
+        raise
 
 
 # ---------------------------------------------------------------- motion graphics (HyperFrames)
 
 MOTION_DIR = BRAND_DIR.parent / "motion"
 NO_TRACKING = {"HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1"}  # the person's renders stay private
-MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "feed", "flythrough", "glass", "carousel", "block", "custom")
+MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "feed", "flythrough", "glass", "carousel", "scene", "block", "custom")
 
 
 def hyperframes_cmd() -> list[str]:
@@ -1564,8 +1674,14 @@ def item_window(item: dict, timing: dict, total: float) -> tuple[float, float]:
     rng = item.get("lines")
     if isinstance(rng, int):
         rng = [rng, rng]
+    if isinstance(item.get("from"), (list, tuple)) and timing.get("words"):
+        flat = [[0, s_, e_, int(ln)] for ln, spans in timing["words"].items() for s_, e_ in spans]
+        win = word_span(sorted(flat, key=lambda x: x[1]), item["from"], item.get("to"))
+        if win is None:
+            raise Problem(f"Motion graphic '{item.get('type')}': words {item['from']}..{item.get('to')} aren't in this video.")
+        return max(0.0, win[0] - 0.1), min(total, win[1] + float(item.get("hold", 0.3)))
     if not isinstance(rng, (list, tuple)) or len(rng) != 2:
-        raise Problem(f"Motion graphic '{item.get('type')}' needs \"lines\": [first, last] (or \"at\": \"start\" / \"end\").")
+        raise Problem(f"Motion graphic '{item.get('type')}' needs \"lines\": [first, last] (or \"from\": [line, word], \"at\": \"start\" / \"end\").")
     found = [timing["lines"][str(n)] for n in range(int(rng[0]), int(rng[1]) + 1) if str(n) in timing["lines"]]
     if not found:
         raise Problem(f"Motion graphic '{item.get('type')}': lines {rng[0]}-{rng[1]} aren't in this video.")
@@ -1690,6 +1806,8 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
         return motion_flythrough(mid, attrs, item, t0, dur, w, h)
     if kind == "glass":
         return motion_glass(mid, attrs, item, t0, dur, w, h, pos)
+    if kind == "scene":
+        return motion_scene(mid, attrs, item, t0, dur, w, h, look, plan_dir, project)
     if kind == "carousel":
         return motion_carousel(mid, attrs, item, t0, dur, w, h, pos, plan_dir, project)
     if kind == "block":
@@ -1726,6 +1844,118 @@ def motion_feed(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int,
           f'.fromTo("#{mid} .heart",{{scale:1}},{{scale:1.6,color:"#FF3B5C",yoyo:true,repeat:1,duration:0.18}},{t0 + 1.1:.3f})'
           f'.to("#{mid} .feed-col",{{scale:{1 / scale:.3f},y:0,duration:0.45,ease:"power2.in"}},{out_at:.3f})'
           f'.to("#{mid}",{{autoAlpha:0,duration:0.15}},{out_at + 0.32:.3f});')
+    return html, js
+
+
+SCENE_LAYOUTS = {  # how the speaker's video sits in a scene: scale, vertical shift (share of height), corner radius (share of width)
+    "card": (0.7, 0.12, 0.05),
+    "window": (0.44, 0.25, 0.06),
+    "split": (0.58, 0.21, 0.04),
+    "full": (1.0, 0.0, 0.0),
+}
+SCENE_BACKGROUNDS = ("grid", "gradient", "dark", "light", "dots")
+
+
+def scene_background(kind: str, look: dict, project: Path, plan_dir: Path) -> tuple[str, bool]:
+    """CSS for a scene's background and whether text on it should be dark (pure but for copying a picture)."""
+    p, a = look["primary"], look["accent"]
+    if kind == "light":
+        return "background:#F3EFE6;background-image:radial-gradient(rgba(0,0,0,.07) 1.5px,transparent 1.5px);background-size:28px 28px", True
+    if kind == "dark":
+        return "background:radial-gradient(circle at 50% 30%,#23232B,#09090C)", False
+    if kind == "gradient":
+        return f"background:radial-gradient(circle at 30% 20%,{a}55,transparent 45%),radial-gradient(circle at 70% 80%,{p},#07070A 75%)", False
+    if kind == "dots":
+        return f"background:{p};background-image:radial-gradient(rgba(255,255,255,.16) 2px,transparent 2px);background-size:34px 34px", False
+    if kind.startswith("#") or kind.startswith("rgb"):
+        return f"background:{kind}", False
+    pic = Path(kind).expanduser()
+    pic = pic if pic.is_absolute() else (plan_dir / pic).resolve()
+    if kind not in SCENE_BACKGROUNDS and pic.exists():
+        shutil.copy2(pic, project / f"bg_{pic.name}")
+        return f"background:#000 url('bg_{esc(pic.name)}') center/cover", False
+    return (f"background:{p};background-image:linear-gradient(rgba(255,255,255,.09) 2px,transparent 2px),"
+            f"linear-gradient(90deg,rgba(255,255,255,.09) 2px,transparent 2px);background-size:72px 72px"), False
+
+
+def readable_accent(accent: str, on_light: bool) -> str:
+    """The accent colour, darkened when it would vanish on a light background (yellow on paper) (pure)."""
+    c = accent.lstrip("#")
+    if not on_light or len(c) != 6:
+        return accent
+    r, g, b = (int(c[i:i + 2], 16) for i in (0, 2, 4))
+    if 0.299 * r + 0.587 * g + 0.114 * b < 140:
+        return accent
+    return "#1F1F1F"  # a light accent (yellow) can't be read as text on paper: dark ink instead (big words get a highlighter)
+
+
+def fit_title(text: str, width: float, height: float, biggest: float) -> int:
+    """A headline size that fits its box: uppercase bold, about 0.6 of the size per letter, 1.05 line height (pure)."""
+    size = biggest
+    while size > 14:
+        per_line = max(1, int(width / (size * 0.6)))
+        lines, cur = 1, 0
+        for word in text.split():
+            if cur and cur + 1 + len(word) > per_line:
+                lines, cur = lines + 1, len(word)
+            else:
+                cur += (1 if cur else 0) + len(word)
+        if lines * size * 1.05 <= height:
+            break
+        size *= 0.92
+    return round(size)
+
+
+def motion_scene(mid: str, attrs: str, item: dict, t0: float, dur: float, w: int, h: int, look: dict, plan_dir: Path, project: Path) -> tuple[str, str]:
+    """A designed scene: the speaker's video moves into a card, a small window or the lower half over a background,
+    with a headline, a list or a big number; then it goes back to full screen. Contrast between neighbouring beats."""
+    layout = item.get("layout", "card")
+    if layout not in SCENE_LAYOUTS:
+        raise Problem(f"Scene layout '{layout}': use {', '.join(SCENE_LAYOUTS)}.")
+    scale, dy, radius = SCENE_LAYOUTS[layout]
+    bg_css, dark_text = scene_background(str(item.get("background", "grid")), look, project, plan_dir)
+    u = min(w, h) / 100
+    ink = "#141414" if dark_text else "#FFFFFF"
+    accent = look["accent"]
+    text_accent = readable_accent(accent, dark_text)  # small text in the accent: darker on paper
+    top_room = h * (0.5 - scale / 2 + dy)  # free space above the video
+    room = max(top_room - h * 0.06 - 4 * u, h * 0.12)
+    rows = len(item.get("items") or []) * 9.5 * u + (6.5 * u if item.get("kicker") else 0) + (7 * u if item.get("sub") else 0) + (24 * u if item.get("number") is not None else 0)
+    title_fs = fit_title(str(item.get("title") or ""), w - 14 * u, max(room - rows, room * 0.35), 11 * u)
+    parts = []
+    if item.get("kicker"):
+        parts.append(f'<div class="sc-kick" style="color:{text_accent}">{esc(item["kicker"])}</div>')
+    if item.get("title"):
+        hl = {x.lower() for x in item.get("highlight") or []}
+        tint = (f' style="background:{accent};color:{ink};padding:0 .1em;border-radius:.08em"' if dark_text  # a highlighter on paper
+                else f' style="color:{accent}"')
+        words = "".join(f'<span class="sc-w"{tint if x.lower().strip(".,!?") in hl else ""}>{esc(x)}</span> ' for x in str(item["title"]).split())
+        parts.append(f'<div class="sc-title" style="color:{ink};font-size:{title_fs}px">{words}</div>')
+    if item.get("number") is not None:
+        n = item["number"] if isinstance(item["number"], dict) else {"to": item["number"]}
+        parts.append(f'<div class="sc-num" style="color:{text_accent}">{esc(n.get("prefix", ""))}<span class="sc-v">{float(n.get("from", 0)):,.0f}</span>{esc(n.get("suffix", ""))}</div>'
+                     + (f'<div class="sc-sub" style="color:{ink}">{esc(n["label"])}</div>' if n.get("label") else ""))
+    for x in item.get("items") or []:
+        parts.append(f'<div class="sc-row" style="color:{ink}"><span class="sc-dot" style="background:{text_accent}"></span>{esc(x)}</div>')
+    if item.get("sub"):
+        parts.append(f'<div class="sc-sub" style="color:{ink}">{esc(item["sub"])}</div>')
+    text_h = max(top_room - 6 * u, h * 0.12)
+    content = f'<div class="sc-text" style="top:{round(h * 0.06)}px;height:{round(text_h)}px">{"".join(parts)}</div>' if parts else ""
+    text_attrs = attrs.replace(f'id="{mid}"', f'id="{mid}t"')
+    html = f'<div {attrs} class="sc-bg" style="{bg_css}"></div><div {text_attrs} class="g sc-layer">{content}</div>'
+    t_in, t_out = t0, max(t0 + 0.6, t0 + dur - 0.38)
+    js = (f'tl.fromTo("video.base",{{scale:1,y:0,borderRadius:0}},{{scale:{scale},y:{round(h * dy)},borderRadius:{round(w * radius / scale)},boxShadow:"0 {round(2 * u)}px {round(6 * u)}px rgba(0,0,0,.45)",duration:0.45,ease:"power3.inOut"}},{t_in:.3f})'
+          f'.to("video.base",{{scale:1,y:0,borderRadius:0,boxShadow:"0 0 0 rgba(0,0,0,0)",duration:0.38,ease:"power3.inOut"}},{t_out:.3f});')
+    if parts:
+        js += (f'tl.from("#{mid}t .sc-kick, #{mid}t .sc-sub",{{y:{round(3 * u)},autoAlpha:0,duration:0.3}},{t_in + 0.3:.3f});'
+               f'tl.from("#{mid}t .sc-w",{{y:{round(6 * u)},autoAlpha:0,duration:0.32,stagger:0.07,ease:"back.out(2)"}},{t_in + 0.25:.3f});'
+               f'tl.from("#{mid}t .sc-row",{{x:-{round(12 * u)},autoAlpha:0,duration:0.3,stagger:{min(0.6, max(0.18, dur * 0.5 / max(1, len(item.get("items") or [1])))):.2f},ease:"power3.out"}},{t_in + 0.45:.3f});'
+               f'tl.to("#{mid}t .sc-text",{{autoAlpha:0,duration:0.25}},{t_out - 0.05:.3f});')
+        if item.get("number") is not None:
+            n = item["number"] if isinstance(item["number"], dict) else {"to": item["number"]}
+            js += (f'(function(){{const o={{v:{float(n.get("from", 0))}}};const el=document.querySelector("#{mid}t .sc-v");'
+                   f'tl.from("#{mid}t .sc-num",{{scale:0.6,autoAlpha:0,duration:0.35,ease:"back.out(2)"}},{t_in + 0.3:.3f});'
+                   f'tl.to(o,{{v:{float(n.get("to", 0))},duration:{max(0.6, min(dur - 1.2, 2.2)):.2f},ease:"power2.out",onUpdate:()=>{{el.textContent=Math.round(o.v).toLocaleString("en-US");}}}},{t_in + 0.4:.3f});}})();')
     return html, js
 
 
@@ -1857,9 +2087,9 @@ video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
 .lt-bar{{width:{round(48 * u)}px;height:{round(1.2 * u)}px;background:{a};margin-bottom:{round(1.2 * u)}px}}
 .lt-name{{display:inline-block;background:{p};padding:{round(u)}px {round(2 * u)}px;font-size:{round(5.5 * u)}px}}
 .lt-role{{display:block;width:max-content;background:{s};padding:{round(0.7 * u)}px {round(2 * u)}px;font-size:{round(3.6 * u)}px;font-weight:600}}
-.num{{font-size:{round(14 * u)}px;font-weight:900;color:{t};text-shadow:0 {round(0.6 * u)}px {round(2 * u)}px rgba(0,0,0,.5)}}
+.num{{display:inline-block;font-size:{round(14 * u)}px;font-weight:900;color:{t};background:rgba(10,10,14,.72);border-radius:{round(3 * u)}px;padding:{round(1 * u)}px {round(4 * u)}px;text-shadow:0 {round(0.6 * u)}px {round(2 * u)}px rgba(0,0,0,.5)}}
 .num .v{{color:{a}}}
-.label{{font-size:{round(4.5 * u)}px;font-weight:700}}
+.label{{display:inline-block;margin-top:{round(1.2 * u)}px;font-size:{round(4.5 * u)}px;font-weight:700;background:rgba(10,10,14,.6);border-radius:{round(2 * u)}px;padding:{round(0.5 * u)}px {round(2.5 * u)}px}}
 .panel{{background:rgba(17,17,17,.82);border-radius:{round(3 * u)}px;padding:{round(3 * u)}px;border-left:{round(u)}px solid {p}}}
 .list-title{{font-size:{round(5.5 * u)}px;margin-bottom:{round(1.5 * u)}px;color:{a}}}
 .row{{font-size:{round(4.6 * u)}px;margin:{round(1.2 * u)}px 0;font-weight:700}}
@@ -1910,6 +2140,18 @@ video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
 .gl-text{{font-size:{round(4.4 * u)}px;font-weight:600;margin-top:{round(1.2 * u)}px;opacity:.92}}
 .gl-row{{font-size:{round(4.4 * u)}px;font-weight:700;margin-top:{round(1.4 * u)}px;display:flex;align-items:center;gap:{round(2 * u)}px}}
 .gl-dot{{width:{round(2 * u)}px;height:{round(2 * u)}px;border-radius:50%;background:{a};flex:none}}
+video.base{{z-index:1;transform-origin:50% 50%}}
+.sc-bg{{position:absolute;inset:0;z-index:0}}
+.g{{z-index:2}}
+.sc-layer{{inset:0}}
+.sc-text{{position:absolute;left:{round(7 * u)}px;right:{round(7 * u)}px;display:flex;flex-direction:column;justify-content:center;gap:{round(1.6 * u)}px}}
+.sc-kick{{font-size:{round(4 * u)}px;letter-spacing:.14em;text-transform:uppercase;font-weight:800}}
+.sc-title{{font-size:{round(11 * u)}px;line-height:1.02;font-weight:900;text-transform:uppercase}}
+.sc-w{{display:inline-block}}
+.sc-num{{font-size:{round(17 * u)}px;line-height:1;font-weight:900}}
+.sc-sub{{font-size:{round(5.2 * u)}px;font-weight:700;opacity:.9}}
+.sc-row{{font-size:{round(7.2 * u)}px;line-height:1.1;font-weight:900;display:flex;align-items:center;gap:{round(2.6 * u)}px}}
+.sc-dot{{width:{round(3.2 * u)}px;height:{round(3.2 * u)}px;border-radius:50%;flex:none}}
 .car{{perspective:{round(w * 2.2)}px}}
 .car-ring{{position:absolute;left:50%;top:0;width:0;height:100%;transform-style:preserve-3d}}
 .car-card{{position:absolute;top:0;background-size:cover;background-position:center;border-radius:{round(2 * u)}px;border:{max(2, round(0.5 * u))}px solid #fff;box-shadow:0 {round(u)}px {round(4 * u)}px rgba(0,0,0,.45);backface-visibility:visible}}
@@ -1994,12 +2236,16 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
 <script>const tl=gsap.timeline({{paused:true}});{''.join(anims)}window.__timelines={{main:tl}};</script>
 </div></body></html>"""
             (project / "index.html").write_text(page, encoding="utf-8")
-            seg = work / f"seg{g}.mp4"
+            segments.append((a, project, work / f"seg{g}.mp4"))
+
+        def draw(job):  # each moment is its own HyperFrames render; a few run at once
+            a, project, seg = job
             proc = subprocess.run([*cli, "render", str(project), "-o", str(seg), "-q", "looks" if final else "draft", "-f", f"{fps:g}", "--quiet"], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
             if proc.returncode != 0 or not seg.exists():
                 tail = "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-8:])
                 raise Problem(f"HyperFrames couldn't render the graphics at {a:.1f}s:\n{tail}\n(The page is in {project}; `hyperframes preview` there shows it.)")
-            segments.append((a, seg))
+            return a, seg
+        segments = side_by_side(draw, segments, heavy=True)
         inputs = ["-i", str(base)]
         chain, label = [], "0:v"
         for g, (a, seg) in enumerate(segments):
@@ -2008,7 +2254,7 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
             label = f"o{g}"
         quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
         # The theme's sound as each graphic appears (unless "sounds": false), mixed under the voice.
-        pops = [(spans[k][0], items[k].get("sound") or look.get("sound")) for k in range(len(items)) if cfg.get("sounds", True) and items[k].get("sound", True) is not False]
+        pops = [(spans[k][0], items[k].get("sound") or ("whoosh" if items[k].get("type") == "scene" else look.get("sound"))) for k in range(len(items)) if cfg.get("sounds", True) and items[k].get("sound", True) is not False]
         pops = [(t, sound_file(str(n))) for t, n in pops if n and sound_file(str(n))]
         audio = ["-map", "0:a?", "-c:a", "copy"]
         if pops and probe(base)["audio"]:
@@ -2019,7 +2265,7 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
                 ms = max(0, round(t * 1000))
                 chain.append(f"[{idx}:a]{AUDIO_FMT},volume=0.4,adelay={ms}|{ms}[p{j}]")
                 mix.append(f"[p{j}]")
-            chain.append(f"[0:a]{''.join(mix)}amix=inputs={len(mix) + 1}:duration=first:normalize=0[amx]")
+            chain.append(f"[0:a]{''.join(mix)}amix=inputs={len(mix) + 1}:duration=first:normalize=0,{LIMITER}[amx]")
             audio = ["-map", "[amx]", "-c:a", "aac", "-b:a", "160k" if final else "96k"]
         run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", *audio, *quality, "-movflags", "+faststart", str(out)])
         base.unlink(missing_ok=True)
@@ -2174,6 +2420,26 @@ def relight_layers(k: int, item: dict, label: str, person: str, a: float, b: flo
 # ---------------------------------------------------------------- studio effects (the engine in ../engine)
 
 
+def workers(jobs: int, heavy: bool = False) -> int:
+    """How many slow steps run at once: about one per two processor cores (fewer for browser renders)."""
+    cores = os.cpu_count() or 2
+    return max(1, min(jobs, cores // (4 if heavy else 2) or 1, 3 if heavy else 8))
+
+
+def THREADS_EACH(jobs: int) -> dict[str, str]:  # noqa: N802
+    """Thread limits for each of several engine runs at once, so they share the cores instead of fighting over them."""
+    n = str(max(1, (os.cpu_count() or 2) // max(1, workers(jobs))))
+    return {"OMP_NUM_THREADS": n, "OPENBLAS_NUM_THREADS": n, "OPENCV_FOR_THREADS_NUM": n}
+
+
+def side_by_side(fn, jobs: list, heavy: bool = False) -> list:
+    """Runs fn on each job, several at once, keeping their order; the first problem stops the rest."""
+    if workers(len(jobs), heavy) <= 1:
+        return [fn(j) for j in jobs]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers(len(jobs), heavy)) as pool:
+        return list(pool.map(fn, jobs))
+
+
 def studio_effects() -> dict[str, str]:
     """The studio effects and what each does, read from the engine (no imports needed)."""
     if not ENGINE.exists():
@@ -2261,19 +2527,24 @@ def apply_studio(out: Path, items: list[tuple[float, float, dict]], brand: dict,
            "DAVNAI_BRAND": json.dumps({"name": brand.get("name") or "", "handle": look.get("handle") or "", "primary": look["primary"], "accent": look["accent"]})}
     try:
         ensure_fonts(FONT_SOURCES)
-        segments = []
+        jobs = []
         for g, (a, b, ks) in enumerate(merge_windows([(a + offset, b + offset, k) for k, (a, b, _) in enumerate(items)])):
             s0, s1 = max(0.0, a - 0.6), min(total, b + 0.6)
             seg, done = work / f"seg{g}.mp4", work / f"seg{g}_fx.mp4"
             run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{s0:.3f}", "-t", f"{s1 - s0:.3f}", "-i", str(base), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", str(seg)])
             plan = studio_plan([items[k] for k in ks], s0, offset, resolve, work)
             (work / f"seg{g}.json").write_text(json.dumps({"effects": plan}, indent=1), encoding="utf-8")
-            say(f"Studio effects at {a:.1f}s ({', '.join(p['fx'] for p in plan)}): this takes a little while...")
-            proc = subprocess.run([sys.executable, str(ENGINE), "--plan", str(work / f"seg{g}.json"), str(seg), str(done), "--width", str(min(w, h))],
-                                  env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+            jobs.append((a, s0, s1, seg, done, work / f"seg{g}.json"))
+        say(f"Studio effects: {len(jobs)} moment{'s' * (len(jobs) != 1)}, {workers(len(jobs))} at a time...")
+
+        def one(job):
+            a, s0, s1, seg, done, plan_file = job
+            proc = subprocess.run([sys.executable, str(ENGINE), "--plan", str(plan_file), str(seg), str(done), "--width", str(min(w, h))],
+                                  env={**env, **THREADS_EACH(len(jobs))}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
             if proc.returncode != 0 or not done.exists():
                 raise Problem(f"The studio effect at {a:.1f}s didn't render:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-6:]))
-            segments.append((s0, s1, done))
+            return s0, s1, done
+        segments = side_by_side(one, jobs)
         inputs, chain, label = ["-i", str(base)], [], "0:v"
         for g, (s0, s1, done) in enumerate(segments):
             inputs += ["-itsoffset", f"{s0:.3f}", "-i", str(done)]
@@ -2332,6 +2603,33 @@ def compare_labels(a: float, b: float, item: dict, w: int, h: int) -> list[tuple
     return [(a, b, str(left), w // 4, y), (a, b, str(right), w * 3 // 4, y)]
 
 
+def picture_sounds(cfg: dict, words: list[list], total: float, taken: list[float]) -> list[tuple[float, str]]:
+    """Automatic sound effects for what changes on screen: punch zooms, effects and cut-out moments (thinned, so they
+    never crowd: at least 0.7 s apart, and never on top of a transition's sound). A plan entry's own "sound" wins (pure)."""
+    events = []
+    for z in cfg.get("zoom") or []:
+        rng = z.get("lines") if isinstance(z, dict) else z
+        win = line_window(words, int(rng[0]), int(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
+        if isinstance(z, dict) and isinstance(z.get("from"), (list, tuple)):
+            win = word_span(words, z["from"], z.get("to"))
+        if win and (z.get("style", "punch") if isinstance(z, dict) else "punch") == "punch":
+            events.append((win[0], (z.get("sound") if isinstance(z, dict) else None) or "swoosh"))
+    for item in cfg.get("fx") or []:
+        if item.get("sound") is False or item.get("type") in ("grain", "custom") or item.get("all"):
+            continue
+        try:
+            a, _b = fx_window(item, words, total)
+        except Problem:
+            continue
+        events.append((a, item.get("sound") or ("impact" if item.get("type") in ("behind", "poster") else "whoosh")))
+    out, used = [], sorted(taken)
+    for t, name in sorted(events):
+        if all(abs(t - u) >= 0.7 for u in used) and sound_file(name):
+            out.append((t, name))
+            used.append(t)
+    return out
+
+
 def fx_window(item: dict, words: list[list], total: float) -> tuple[float, float]:
     """Where an effect plays in the edited video (main part), from its lines: code, never the AI."""
     if item.get("all"):
@@ -2343,8 +2641,16 @@ def fx_window(item: dict, words: list[list], total: float) -> tuple[float, float
     rng = item.get("lines")
     if isinstance(rng, int):
         rng = [rng, rng]
+    if isinstance(item.get("from"), (list, tuple)):
+        win = word_span(words, item["from"], item.get("to"))
+        if win is None:
+            raise Problem(f"Effect '{item.get('type')}': words {item['from']}..{item.get('to')} aren't in this video.")
+        a, b = win
+        if item.get("type") == "flash":
+            b = a + float(item.get("seconds", 0.15))
+        return max(0.0, a - 0.05), min(total, b + 0.05)
     if not isinstance(rng, (list, tuple)) or len(rng) != 2:
-        raise Problem(f"Effect '{item.get('type')}' needs \"lines\": [first, last] (or \"all\": true, \"at\": \"start\"/\"end\").")
+        raise Problem(f"Effect '{item.get('type')}' needs \"lines\": [first, last] (or \"from\": [line, word], \"all\": true, \"at\": \"start\"/\"end\").")
     win = line_window(words, int(rng[0]), int(rng[1]))
     if win is None:
         raise Problem(f"Effect '{item.get('type')}': lines {rng[0]}-{rng[1]} aren't in this video.")
@@ -2606,9 +2912,9 @@ def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict,
                 run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-framerate", "30", "-t", f"{b - a:.3f}", "-i", str(still), "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(seg)])
             else:
                 run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{a + offset:.3f}", "-t", f"{b - a:.3f}", "-i", str(base), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", str(seg)])
-            person = work / f"person{k}.webm"
-            cut_out_person(seg, person)
-            people.append((a + offset, b + offset, person))
+            people.append((a + offset, b + offset, work / f"person{k}.webm", seg))
+        side_by_side(lambda job: cut_out_person(job[3], job[2]), people)
+        people = [(a, b, person) for a, b, person, _seg in people]
         ass = work / "behind.ass"
         behind_ass(ass, w, h, items, brand, offset, face)
         look = brand_look(brand)
@@ -3253,6 +3559,56 @@ def cmd_probe(args) -> None:
     say(json.dumps({"filename": info["file"], "size": info["bytes"], "duration_seconds": info["seconds"], "width": info["width"], "height": info["height"]}))
 
 
+MUSIC_DIR = BRAND_DIR.parent / "music"
+
+
+def cmd_music(args) -> None:
+    """Downloads a music track (from Davnai's get_music_file link) to ~/.davnai/music and prints the file to use."""
+    url = str(args.url)
+    if not url.startswith("https://"):
+        raise Problem("Give the music_url from Davnai's get_music_file (it starts with https://).")
+    code, _headers, data = http(url, timeout=120)
+    if code != 200 or len(data) < 1000:
+        raise Problem("Couldn't download that track (the link lasts an hour: ask Davnai's get_music_file again).")
+    ext = next((e for e in (".mp3", ".m4a", ".wav", ".aac", ".ogg") if e in url.split("?")[0].lower()), ".mp3")
+    name = re.sub(r"[^\w-]+", "-", args.name or "track").strip("-").lower() or "track"
+    MUSIC_DIR.mkdir(parents=True, exist_ok=True)
+    path = MUSIC_DIR / f"{name}{ext}"
+    path.write_bytes(data)
+    seconds = probe(path)["seconds"]
+    say(f"Saved {path} ({seconds:.0f}s). In the plan: \"music\": \"{path.as_posix()}\" (it dips under the voice by itself; it loops if the video is longer).")
+
+
+def pace_numbers(changes: list[float], seconds: float, words: list[list]) -> dict:
+    """How busy a video is: visual changes per second, the longest stretch with nothing changing, words per second
+    and when the first word lands (pure)."""
+    marks = [0.0] + sorted(t for t in changes if 0 < t < seconds) + [seconds]
+    still = max((b - a for a, b in zip(marks, marks[1:])), default=seconds)
+    talk = [w for w in words if w[2] > w[1]]
+    span = (talk[-1][2] - talk[0][1]) if talk else 0.0
+    return {"seconds": round(seconds, 1), "visual_changes": len(marks) - 2, "changes_per_second": round((len(marks) - 2) / max(seconds, 0.1), 2),
+            "longest_still_seconds": round(still, 1), "words_per_second": round(len(talk) / span, 2) if span > 0 else None,
+            "first_word_seconds": round(talk[0][1], 2) if talk else None}
+
+
+def cmd_pace(args) -> None:
+    """Measures the pace of a video (yours or a reference): changes on screen and talking speed."""
+    path = Path(args.file).expanduser().resolve()
+    info = probe(path)
+    proc = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-vf", f"scale=180:-2,select='gt(scene,{args.threshold})',showinfo", "-an", "-f", "null", "-"],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    changes = [float(x) for x in re.findall(r"pts_time:([\d.]+)", proc.stderr)]
+    words = []
+    if transcript_path(path).exists():
+        words = [wd for ln in load_transcript(path)["lines"] for wd in ln["words"]]
+    nums = pace_numbers(changes, info["seconds"], words)
+    say(json.dumps(nums),
+        f"{nums['visual_changes']} visual changes in {nums['seconds']}s ({nums['changes_per_second']} a second); longest stretch with nothing changing: {nums['longest_still_seconds']}s."
+        + (f" Talking speed {nums['words_per_second']} words a second; first word at {nums['first_word_seconds']}s." if nums["words_per_second"] else " (Transcribe it to also get the talking speed.)"),
+        "Short-form that holds attention usually changes something every 1 to 2 seconds and never sits still much over 3 seconds. "
+        "Graphics that move inside the picture (titles, counters) count less than cuts and scene changes; for those, step through frames.")
+
+
 def read_ticket(ticket: str) -> dict:
     try:
         raw = ticket.strip()
@@ -3400,6 +3756,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("file")
     p.add_argument("--captions", action="store_true", help="also check captions against faces")
     p.set_defaults(fn=cmd_qc)
+    p = sub.add_parser("music", help="download a music track from Davnai's get_music_file link")
+    p.add_argument("url")
+    p.add_argument("--name", help="a name for the file (the track's title)")
+    p.set_defaults(fn=cmd_music)
+    p = sub.add_parser("pace", help="how busy a video is: visual changes a second, longest still stretch, talking speed")
+    p.add_argument("file")
+    p.add_argument("--threshold", type=float, default=0.18, help="how big a change counts (0 to 1, default 0.18)")
+    p.set_defaults(fn=cmd_pace)
     p = sub.add_parser("probe", help="size and length for upload_from_computer")
     p.add_argument("file")
     p.set_defaults(fn=cmd_probe)

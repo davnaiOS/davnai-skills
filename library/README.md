@@ -98,7 +98,7 @@ They track the face and can sit behind the person. Options for each: [reference/
 | `crayon-write` | A red crayon writes your word behind your head, then underlines it |
 | `fan-build` | Your reel covers deal into a fan behind your head, one card at a time |
 
-## Motion graphics (16)
+## Motion graphics (17)
 
 In the brand's colours and fonts, made with HyperFrames (`setup --motion`).
 
@@ -114,6 +114,7 @@ In the brand's colours and fonts, made with HyperFrames (`setup --motion`).
 | [Quote card](motion/quote.md) | A full-screen quote in the brand colour. |
 | [Feed scroll](motion/feed.md) | Your video plays inside a social post that scrolls up a phone feed into place (with your handle, a like and a caption), then zooms back to full screen. |
 | [Chapter flythrough](motion/flythrough.md) | A 'coming up' opener: a card per chapter, with a still from that moment and its title, flies past in 3D. |
+| [Scene](motion/scene.md) | Your video moves into a card, a small window or the lower half over a designed background (grid, gradient, dark, paper, dots, a colour or a picture), with a headline, a list or a counting number, then back to full screen. The main tool for making a talking video feel designed. |
 | [Glass panel](motion/glass.md) | A frosted-glass card over the video (the picture shows through, blurred) with an icon, a title, a line or a list, and a light sheen. |
 | [Picture carousel](motion/carousel.md) | Pictures on a slowly turning 3D ring over the video, kept off the face and the captions. |
 | [Chapter card](motion/chapter.md) | A full-screen chapter card wipes in and out. |

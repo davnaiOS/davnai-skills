@@ -557,3 +557,60 @@ def test_new_windows_installs_are_found(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "C:/x")
     davnai.find_new_installs()
     assert str(links) in __import__("os").environ["PATH"]
+
+
+def test_split_words_are_joined_back():
+    words = [["$7", 0, 1], [",000", 1, 2], ["at", 2, 3], ["8", 3, 4], ["%", 4, 5], ["non", 5, 6], ["-registered", 6, 7], ["it", 7, 8], ["'s", 8, 9], ["-", 9, 10], ["ok", 10, 11]]
+    assert [w[0] for w in davnai.join_pieces(words)] == ["$7,000", "at", "8%", "non-registered", "it's", "-", "ok"]
+    assert davnai.join_pieces(words)[0][1:] == [0, 2]
+
+
+def test_zoom_splits_never_leave_slivers():
+    pieces = davnai.split_pieces([{"s": 0.0, "e": 3.0}], [0.1, 1.0, 1.1, 2.95])
+    assert [(p["s"], p["e"]) for p in pieces] == [(0.0, 1.0), (1.0, 3.0)]
+    assert min(p["e"] - p["s"] for p in pieces) >= 0.25
+
+
+def test_cuts_fade_and_the_sound_is_limited():
+    assert davnai.CUT_FADE < 0.03 and "alimiter" in davnai.LIMITER and "acompressor" in davnai.VOICE_CLEAN
+
+
+def test_scenes_move_the_video_and_fit_their_words():
+    look = davnai.brand_look({})
+    html, js = davnai.motion_item(0, {"type": "scene", "layout": "window", "background": "grid", "kicker": "The setup", "title": "Tax-sheltered compounding", "highlight": ["compounding"], "items": ["a", "b"]}, 1.0, 4.0, 540, 960, look, Path("."), Path("."))
+    assert 'class="sc-bg"' in html and html.count("sc-row") == 2 and 'video.base' in js and "scale:0.44" in js
+    assert davnai.fit_title("Tax-sheltered compounding", 465, 60, 59) < davnai.fit_title("Tax-sheltered compounding", 465, 200, 59)
+    paper, _ = davnai.motion_item(1, {"type": "scene", "background": "light", "title": "$0 tax", "highlight": ["$0"]}, 0, 3, 540, 960, look, Path("."), Path("."))
+    assert "background:" + look["accent"] in paper  # a highlighter behind the word on paper, not yellow text
+    assert davnai.readable_accent("#FFE14D", True) == "#1F1F1F" and davnai.readable_accent("#1E40AF", True) == "#1E40AF"
+    with pytest.raises(davnai.Problem):
+        davnai.motion_item(2, {"type": "scene", "layout": "diamond"}, 0, 3, 540, 960, look, Path("."), Path("."))
+
+
+def test_words_inside_a_line_can_time_things():
+    words = [["a", 1.0, 1.2, 4], ["b", 1.3, 1.5, 4], ["c", 1.6, 1.9, 4], ["d", 2.5, 2.8, 5]]
+    assert davnai.word_span(words, [4, 2], [5, 1]) == (1.3, 2.8)
+    assert davnai.word_span(words, [4, 3]) == (1.6, 1.9)
+    assert davnai.word_span(words, [9, 1]) is None
+    assert davnai.fx_window({"type": "bw", "from": [4, 2], "to": [4, 3]}, words, 10) == pytest.approx((1.25, 1.95))
+
+
+def test_captions_shift_for_an_intro_and_step_aside_for_scenes(tmp_path):
+    text = "Dialogue: 0,0:00:01.50,0:00:02.00,Davnai,,0,0,0,,hi"
+    assert "0:00:03.50,0:00:04.00" in davnai.shift_ass(text, 2.0)
+    words = [["hello", 0.5, 0.8, 1], ["there", 0.9, 1.2, 1], ["after", 5.0, 5.3, 2]]
+    ass = tmp_path / "c.ass"
+    davnai.write_ass(ass, 540, 960, {"captions": True, "caption_words": 2}, {}, words, 6, hide=[(0.0, 2.0)])
+    events = [ln for ln in ass.read_text().splitlines() if ln.startswith("Dialogue")]
+    low = [e for e in events if "hello" in e.lower()]
+    assert low and all(",0,0,53,," in e and "\\an2" in e for e in low)  # still shown, at the bottom of the frame
+    assert any("after" in e.lower() and ",0,0,0,," in e for e in events)
+
+
+def test_pace_and_picture_sounds():
+    nums = davnai.pace_numbers([2.0, 4.0, 9.0], 10.0, [["a", 0.5, 0.7, 1], ["b", 0.8, 1.0, 1]])
+    assert nums["visual_changes"] == 3 and nums["longest_still_seconds"] == 5.0 and nums["first_word_seconds"] == 0.5
+    words = [["a", 1.0, 1.2, 1], ["b", 1.25, 1.4, 1], ["c", 3.0, 3.3, 2]]
+    sounds = davnai.picture_sounds({"zoom": [{"lines": [1, 1]}, {"lines": [2, 2], "style": "smooth"}], "fx": [{"type": "behind", "text": "X", "lines": [1, 1]}, {"type": "glitch", "lines": [2, 2]}]}, words, 5, [])
+    assert [n for _, n in sounds] == ["impact", "whoosh"]  # the zoom's swoosh would land on the hit: thinned
+    assert "sidechaincompress" in davnai.DUCK and "dynaudnorm" in davnai.VOICE_CLEAN

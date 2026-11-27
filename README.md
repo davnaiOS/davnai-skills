@@ -28,6 +28,7 @@ Skills that teach your AI to edit videos on your own computer the Davnai way, th
 
 ### Effects
 
+- **Scenes:** the video moves into a card, a small window or the lower half over a designed background, with a headline, a list or a counting number, then back to full screen. Your AI plans a new beat every few seconds, so a talking video feels designed, not just captioned.
 - **51 studio effects** that track your face and can sit behind you: pictures orbiting your head, glass widgets, comment boxes, tier lists, checklists, magazine covers, message pop-ups, an LED sign and more ([the list](skills/davnai-video/reference/studio.md)).
 - **Signature effects:** big words behind you (sliced on the music's beat), poster moments, before and after, pictures cycling behind you, relighting (spotlight, neon glow, silhouette, rim light, golden hour), shake, flash, glitch, VHS, grain, light leaks, split screen and beat pulses.
 - **Motion graphics** with [HyperFrames](https://github.com/heygen-com/hyperframes): animated titles, lower thirds, counters, lists, charts, chapter cards, end screens, a feed scroll, a 3D chapter flythrough, glass panels, a 3D picture carousel and HyperFrames' 448 catalog pieces, all in your brand.
@@ -39,6 +40,7 @@ Skills that teach your AI to edit videos on your own computer the Davnai way, th
 - **Review page:** mark moments on the video (change, cut, keep, question) and your AI gets your notes as transcript lines. It remembers your lasting preferences and can match the style of a reel you like.
 - **Quality checks** on every render: black or frozen picture, loudness for social apps, long silences, captions covering a face.
 - **You approve everything:** quick previews first, the final only when you say so, and posts wait for your OK in Davnai.
+- **Sound that's mixed:** a whoosh or hit on every zoom and effect, your voice cleaned and evened out, and music from Davnai's instrumental library (or your own) that dips while you speak.
 - **Cheaper:** the editing runs on your computer with free tools, and the AI picks moments by line number instead of guessing times, so it uses far fewer tokens.
 
 ## Get started
