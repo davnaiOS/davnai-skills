@@ -1,6 +1,6 @@
 # Faceless videos (stock clips or pictures + a voice-over)
 
-1. **Voice-over:** the person's own recording (a file they give you), or a voice made by a tool they choose. Davnai doesn't make voices here.
+1. **Voice-over:** the person's own recording (a file they give you), or a free voice made on this computer: write the script, then `python davnai.py voice script.txt -o voiceover.wav --voice af_heart` (needs `setup --motion`; voices include af_heart, af_nova, am_michael, bf_emma, bm_george). Tell the person it's an AI voice, and use paid voice services only if they ask.
 2. **Transcribe the voice-over:** `python davnai.py transcribe "<voice file>"`.
 3. **Clips and pictures** (cheapest source first, see `stock.md`): put them in a folder next to the voice-over.
 4. **Plan:** one scene per idea, covering transcript lines in order, with no gaps. Every line must be in exactly one scene.

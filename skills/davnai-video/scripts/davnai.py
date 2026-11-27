@@ -6,7 +6,10 @@ Commands (python davnai.py <command> --help for details):
   brand <brand_url>         save the Brand Kit from Davnai (get_brand_files) in ~/.davnai/brand
   transcribe <video>        numbered transcript lines (reused on the second run)
   frame <video> --line N    one still from the middle of line N (to check framing)
-  render <plan.json>        previews (v1, v2, ...); --final for full quality
+  storyboard <plan.json>    the scenes to approve before rendering (and a picture page)
+  render <plan.json>        previews (v1, v2, ...); --final for full quality; motion graphics via HyperFrames
+  setup [--motion]          install what's missing (asks first; --yes when the person already agreed)
+  voice "<text>"            a free voice-over made on this computer (faceless videos)
   probe <file>              name, size, length, width, height (for upload_from_computer)
   upload <file> <ticket>    send the final to Davnai (ticket from upload_from_computer)
 
@@ -29,7 +32,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -161,7 +164,7 @@ def cmd_check(_args) -> None:
             lines.append(f"✓ {tool}")
         else:
             ok = False
-            lines.append(f"✗ {tool}: install ffmpeg (Windows: winget install ffmpeg; Mac: brew install ffmpeg; Linux: apt install ffmpeg).")
+            lines.append(f"✗ {tool}: run python davnai.py setup (or install ffmpeg: Windows winget install Gyan.FFmpeg; Mac brew install ffmpeg; Linux apt install ffmpeg).")
     if shutil.which("ffmpeg"):
         filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
         lines.append("✓ captions (libass)" if re.search(r"\bass\b", filters) else "✗ this ffmpeg can't burn captions (no libass): install a full ffmpeg build.")
@@ -170,14 +173,19 @@ def cmd_check(_args) -> None:
         lines.append("✓ transcripts (faster-whisper)")
     except ImportError:
         ok = False
-        lines.append("✗ transcripts: pip install faster-whisper")
+        lines.append("✗ transcripts: run python davnai.py setup (or pip install faster-whisper)")
     try:
         import fontTools  # noqa: F401
         lines.append("✓ brand fonts (fonttools)")
     except ImportError:
         lines.append("· optional: pip install fonttools brotli (uses the exact Brand Kit caption font)")
+    hf = MOTION_DIR / "node_modules" / "hyperframes" / "bin" / "hyperframes.mjs"
+    if node_major() >= 22 and hf.exists():
+        lines.append("✓ motion graphics (HyperFrames)")
+    else:
+        lines.append("· optional: motion graphics need Node.js 22+ and HyperFrames: python davnai.py setup --motion")
     lines.append("✓ Brand Kit saved" if (BRAND_DIR / "brand.json").exists() else "· Brand Kit not saved yet: call get_brand_files in Davnai, then run: davnai.py brand \"<brand_url>\"")
-    lines.append("Ready." if ok else "Install what's marked ✗, then run check again.")
+    lines.append("Ready." if ok else "Ask the person, then run: python davnai.py setup --yes (add --motion for motion graphics). Then check again.")
     say(*lines)
 
 
@@ -874,6 +882,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         graph.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={seconds:.2f},aformat=sample_fmts=fltp[enda]")
         tail_pieces.append(("endv", "enda"))
     pieces_seq = []
+    intro_len = 0.0
     for end in ("intro", "outro"):
         part = brand.get(end) or {}
         path = BRAND_DIR / ((part.get("file") or {}).get("path") or "-")
@@ -883,6 +892,8 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             graph.append(fit(f"{pi}:v", f"{end}v", w, h, fps))
             graph.append(f"[{pi}:a]{AUDIO_FMT}[{end}a]" if pinfo["audio"] else f"anullsrc=r=48000:cl=stereo,atrim=duration={pinfo['seconds']:.3f},aformat=sample_fmts=fltp[{end}a]")
             pieces_seq.append(end)
+            if end == "intro":
+                intro_len = pinfo["seconds"]
     seq = ([("introv", "introa")] if "intro" in pieces_seq else []) + [(label, alabel)] + tail_pieces + ([("outrov", "outroa")] if "outro" in pieces_seq else [])
     if len(seq) > 1:
         graph.append(f"[{label}]setsar=1[vmain]")
@@ -903,7 +914,503 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
     # ffmpeg 7 reads a filter script with "-/filter_complex"; older versions with -filter_complex_script.
     cmd += ["-/filter_complex" if ffmpeg_major() >= 7 else "-filter_complex_script", script.name, "-map", f"[{label}]", "-map", f"[{alabel}]", *quality, "-movflags", "+faststart", out.name]
     run(cmd, cwd=folder)
+    # Where each transcript line is in this video (code works out times; the AI only names lines).
+    windows: dict[int, list[float]] = {}
+    for wd in words:
+        win = windows.setdefault(int(wd[3]), [wd[1], wd[2]])
+        win[0], win[1] = min(win[0], wd[1]), max(win[1], wd[2])
+    timing = {"offset": intro_len, "main": main_len, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
+    (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
+    if cfg.get("motion"):
+        apply_motion(out, cfg, brand, timing, w, h, fps, final, folder, f"{name}_v{version}", plan_dir)
     return out
+
+
+# ---------------------------------------------------------------- motion graphics (HyperFrames)
+
+MOTION_DIR = BRAND_DIR.parent / "motion"
+NO_TRACKING = {"HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1"}  # the person's renders stay private
+MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "custom")
+
+
+def hyperframes_cmd() -> list[str]:
+    node = shutil.which("node")
+    cli = MOTION_DIR / "node_modules" / "hyperframes" / "bin" / "hyperframes.mjs"
+    if not node or not cli.exists():
+        raise Problem("Motion graphics need Node.js 22+ and HyperFrames. Ask the person, then run: python davnai.py setup --motion")
+    return [node, str(cli)]
+
+
+def esc(t) -> str:
+    return str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def brand_look(brand: dict) -> dict:
+    caps = brand.get("captions") or {}
+    look = {**DEFAULT_STYLE, **(caps.get("look") or {})}
+    colours = [c.get("hex") for c in brand.get("colours") or [] if c.get("hex")]
+    font_file = caps.get("font", {}).get("name") if isinstance(caps.get("font"), dict) else None
+    return {
+        "primary": colours[0] if colours else "#4F46E5",
+        "secondary": colours[1] if len(colours) > 1 else "#111827",
+        "accent": look.get("accent") or "#FACC15",
+        "text": "#FFFFFF",
+        "font": caps.get("font_family") or "Arial",
+        "font_file": f"fonts/{font_file}" if font_file and (BRAND_DIR / "fonts" / font_file).exists() else None,
+        "logo": (brand.get("logo") or {}).get("file"),
+        "handle": brand.get("handle") or "",
+    }
+
+
+def item_window(item: dict, timing: dict, total: float) -> tuple[float, float]:
+    """Where a graphic goes, from its transcript lines (or the start or end of the video): code, never the AI."""
+    if item.get("at") == "start":
+        return 0.0, min(total, float(item.get("seconds", 3)))
+    if item.get("at") == "end":
+        end = timing["offset"] + timing["main"]
+        return max(0.0, end - float(item.get("seconds", 3))), end
+    rng = item.get("lines")
+    if isinstance(rng, int):
+        rng = [rng, rng]
+    if not isinstance(rng, (list, tuple)) or len(rng) != 2:
+        raise Problem(f"Motion graphic '{item.get('type')}' needs \"lines\": [first, last] (or \"at\": \"start\" / \"end\").")
+    found = [timing["lines"][str(n)] for n in range(int(rng[0]), int(rng[1]) + 1) if str(n) in timing["lines"]]
+    if not found:
+        raise Problem(f"Motion graphic '{item.get('type')}': lines {rng[0]}-{rng[1]} aren't in this video.")
+    a, b = min(f[0] for f in found), max(f[1] for f in found)
+    if item.get("type") == "chapter":
+        b = min(b, a + float(item.get("seconds", 2.2)))
+    return max(0.0, a - 0.1), min(total, b + float(item.get("hold", 0.3)))
+
+
+def spot(position: str, w: int, h: int) -> str:
+    tall = h > w
+    top = {"top": 0.12 if tall else 0.08, "upper": 0.24, "middle": 0.42, "lower": 0.56 if tall else 0.66, "bottom": 0.62 if tall else 0.78}.get(position, 0.12)
+    return f"top:{round(h * top)}px;"
+
+
+def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look: dict, plan_dir: Path, project: Path) -> tuple[str, str]:
+    """One graphic as HTML plus its GSAP animation (positions are seconds inside the segment)."""
+    u = min(w, h) / 100  # 1% of the shorter side
+    kind = item.get("type")
+    mid = f"m{k}"
+    t1 = t0 + dur
+    out_at = max(t0 + 0.4, t1 - 0.35)
+    attrs = f'id="{mid}" data-start="{t0:.3f}" data-duration="{dur:.3f}"'
+    pos = item.get("position", "")
+    if kind == "title":
+        style = item.get("style", "pop")
+        text = str(item.get("text", ""))
+        inner = "".join(f'<span class="w">{esc(x)}</span> ' for x in text.split()) if style in ("words", "typewriter") else esc(text)
+        if style == "typewriter":
+            inner = "".join(f'<span class="c">{esc(c) if c != " " else "&nbsp;"}</span>' for c in text)
+        html = f'<div {attrs} class="g" style="{spot(pos or "top", w, h)}left:{round(6 * u)}px;right:{round(6 * u)}px;text-align:center"><div class="box title">{inner}</div></div>'
+        anim = {
+            "pop": f'tl.from("#{mid} .box",{{scale:0.3,autoAlpha:0,duration:0.45,ease:"back.out(2.2)"}},{t0:.3f});',
+            "slide": f'tl.from("#{mid} .box",{{x:-{w},duration:0.5,ease:"power3.out"}},{t0:.3f});',
+            "bounce": f'tl.from("#{mid} .box",{{y:-{round(h * 0.4)},duration:0.8,ease:"bounce.out"}},{t0:.3f});',
+            "words": f'tl.from("#{mid} .w",{{y:{round(6 * u)},autoAlpha:0,duration:0.35,stagger:0.09,ease:"back.out(2)"}},{t0:.3f});',
+            "typewriter": f'tl.from("#{mid} .c",{{autoAlpha:0,duration:0.01,stagger:{min(0.06, dur * 0.5 / max(1, len(text))):.3f}}},{t0:.3f});',
+            "glow": f'tl.from("#{mid} .box",{{autoAlpha:0,filter:"blur(20px)",scale:1.3,duration:0.6,ease:"power2.out"}},{t0:.3f});',
+        }.get(style)
+        if anim is None:
+            raise Problem(f"Title style '{style}': use pop, slide, bounce, words, typewriter or glow.")
+        return html, anim + f'tl.to("#{mid} .box",{{autoAlpha:0,y:-{round(3 * u)},duration:0.3}},{out_at:.3f});'
+    if kind == "lower_third":
+        # Tall videos: above the face area and clear of the captions; wide videos: the classic lower third.
+        html = (f'<div {attrs} class="g" style="{spot(pos or ("upper" if h > w else "lower"), w, h)}left:{round(5 * u)}px">'
+                f'<div class="lt-bar"></div><div class="lt-name">{esc(item.get("name", ""))}</div><div class="lt-role">{esc(item.get("role", ""))}</div></div>')
+        js = (f'tl.from("#{mid} .lt-bar",{{scaleX:0,transformOrigin:"left",duration:0.4,ease:"power3.out"}},{t0:.3f})'
+              f'.from("#{mid} .lt-name",{{y:{round(4 * u)},autoAlpha:0,duration:0.35}},{t0 + 0.2:.3f})'
+              f'.from("#{mid} .lt-role",{{autoAlpha:0,duration:0.35}},{t0 + 0.4:.3f})'
+              f'.to("#{mid}",{{x:-{w},duration:0.4,ease:"power3.in"}},{out_at - 0.1:.3f});')
+        return html, js
+    if kind in ("callout", "emoji"):
+        corner = {"top-left": f"left:{round(6 * u)}px;top:{round(h * 0.14)}px", "top-right": f"right:{round(6 * u)}px;top:{round(h * 0.14)}px",
+                  "middle": f"left:0;right:0;top:{round(h * 0.4)}px;text-align:center", "bottom-left": f"left:{round(6 * u)}px;top:{round(h * 0.55)}px",
+                  "bottom-right": f"right:{round(6 * u)}px;top:{round(h * 0.55)}px"}.get(pos or "top-right", f"right:{round(6 * u)}px;top:{round(h * 0.14)}px")
+        body = f'<div class="emoji">{esc(item.get("emoji", ""))}</div>' if kind == "emoji" else f'<div class="box callout">{esc(item.get("emoji", ""))} {esc(item.get("text", ""))}</div>'
+        html = f'<div {attrs} class="g" style="{corner}">{body}</div>'
+        sel = f"#{mid} > div"
+        js = (f'tl.from("{sel}",{{scale:0,rotation:-25,duration:0.4,ease:"back.out(3)"}},{t0:.3f})'
+              f'.to("{sel}",{{rotation:6,yoyo:true,repeat:{max(1, int(dur / 0.5))},duration:0.25,ease:"sine.inOut"}},{t0 + 0.4:.3f})'
+              f'.to("{sel}",{{scale:0,autoAlpha:0,duration:0.25}},{out_at:.3f});')
+        return html, js
+    if kind == "counter":
+        start_v, end_v = float(item.get("from", 0)), float(item.get("to", 100))
+        decimals = int(item.get("decimals", 0))
+        html = (f'<div {attrs} class="g" style="{spot(pos or "upper", w, h)}left:0;right:0;text-align:center">'
+                f'<div class="num">{esc(item.get("prefix", ""))}<span class="v">{start_v:,.{decimals}f}</span>{esc(item.get("suffix", ""))}</div>'
+                f'<div class="label">{esc(item.get("label", ""))}</div></div>')
+        js = (f'(function(){{const o={{v:{start_v}}};const el=document.querySelector("#{mid} .v");'
+              f'tl.from("#{mid}",{{scale:0.5,autoAlpha:0,duration:0.35,ease:"back.out(2)"}},{t0:.3f});'
+              f'tl.to(o,{{v:{end_v},duration:{max(0.6, min(dur - 0.8, 2.5)):.2f},ease:"power2.out",onUpdate:()=>{{el.textContent=o.v.toLocaleString("en-US",{{minimumFractionDigits:{decimals},maximumFractionDigits:{decimals}}});}}}},{t0 + 0.2:.3f});'
+              f'tl.to("#{mid}",{{autoAlpha:0,duration:0.3}},{out_at:.3f});}})();')
+        return html, js
+    if kind == "list":
+        items = [str(x) for x in item.get("items") or []]
+        if not items:
+            raise Problem("A list needs \"items\".")
+        title = f'<div class="list-title">{esc(item["title"])}</div>' if item.get("title") else ""
+        rows = "".join(f'<div class="row"><span class="tick">✓</span>{esc(x)}</div>' for x in items)
+        html = f'<div {attrs} class="g panel" style="{spot(pos or "upper", w, h)}left:{round(6 * u)}px;right:{round(6 * u)}px">{title}{rows}</div>'
+        gap = min(0.8, max(0.2, (dur * 0.6) / len(items)))
+        js = f'tl.from("#{mid}",{{autoAlpha:0,y:{round(3 * u)},duration:0.3}},{t0:.3f});'
+        js += f'tl.from("#{mid} .row",{{x:-{round(20 * u)},autoAlpha:0,duration:0.3,stagger:{gap:.2f},ease:"power3.out"}},{t0 + 0.3:.3f});'
+        return html, js + f'tl.to("#{mid}",{{autoAlpha:0,duration:0.3}},{out_at:.3f});'
+    if kind == "chart":
+        bars = item.get("bars") or []
+        if not bars:
+            raise Problem("A chart needs \"bars\": [{\"label\": \"Jan\", \"value\": 10}, ...].")
+        top = max(float(b.get("value", 0)) for b in bars) or 1
+        cols = "".join(f'<div class="col"><div class="val">{esc(b.get("display", b.get("value", "")))}</div><div class="bar" style="height:{round(float(b.get("value", 0)) / top * 30 * u)}px"></div><div class="lab">{esc(b.get("label", ""))}</div></div>' for b in bars)
+        title = f'<div class="list-title">{esc(item["title"])}</div>' if item.get("title") else ""
+        html = f'<div {attrs} class="g panel" style="{spot(pos or "upper", w, h)}left:{round(6 * u)}px;right:{round(6 * u)}px">{title}<div class="chart">{cols}</div></div>'
+        js = (f'tl.from("#{mid}",{{autoAlpha:0,duration:0.3}},{t0:.3f})'
+              f'.from("#{mid} .bar",{{scaleY:0,transformOrigin:"bottom",duration:0.6,stagger:0.12,ease:"power3.out"}},{t0 + 0.2:.3f})'
+              f'.from("#{mid} .val",{{autoAlpha:0,duration:0.2,stagger:0.12}},{t0 + 0.6:.3f})'
+              f'.to("#{mid}",{{autoAlpha:0,duration:0.3}},{out_at:.3f});')
+        return html, js
+    if kind in ("quote", "chapter"):
+        if kind == "quote":
+            body = f'<div class="quote">“{esc(item.get("text", ""))}”</div>' + (f'<div class="author">— {esc(item["author"])}</div>' if item.get("author") else "")
+        else:
+            body = (f'<div class="chap-num">{esc(item.get("number", ""))}</div>' if item.get("number") is not None else "") + f'<div class="chap-title">{esc(item.get("text", ""))}</div>'
+        html = f'<div {attrs} class="g full"><div class="full-in">{body}</div></div>'
+        js = (f'tl.from("#{mid}",{{clipPath:"inset(0 100% 0 0)",duration:0.45,ease:"power3.inOut"}},{t0:.3f})'
+              f'.from("#{mid} .full-in > div",{{y:{round(5 * u)},autoAlpha:0,duration:0.4,stagger:0.12}},{t0 + 0.3:.3f})'
+              f'.to("#{mid}",{{clipPath:"inset(0 0 0 100%)",duration:0.4,ease:"power3.inOut"}},{max(t0 + 0.8, t1 - 0.4):.3f});')
+        return html, js
+    if kind == "end_screen":
+        logo = ""
+        if look["logo"] and (BRAND_DIR / look["logo"]).exists():
+            shutil.copy2(BRAND_DIR / look["logo"], project / look["logo"])
+            logo = f'<img class="logo" src="{esc(look["logo"])}">'
+        html = (f'<div {attrs} class="g full"><div class="full-in">{logo}<div class="chap-title">{esc(item.get("text", "Follow for more"))}</div>'
+                f'<div class="handle">{esc(item.get("handle") or look["handle"])}</div><div class="btn">{esc(item.get("button", "Follow"))}</div></div></div>')
+        js = (f'tl.from("#{mid}",{{autoAlpha:0,duration:0.4}},{t0:.3f})'
+              f'.from("#{mid} .full-in > *",{{y:{round(6 * u)},autoAlpha:0,duration:0.4,stagger:0.12,ease:"back.out(1.8)"}},{t0 + 0.2:.3f})'
+              f'.to("#{mid} .btn",{{scale:1.08,yoyo:true,repeat:{max(1, int(dur / 0.6))},duration:0.3}},{t0 + 1.0:.3f});')
+        return html, js
+    if kind == "custom":
+        src = Path(str(item.get("html", ""))).expanduser()
+        src = src if src.is_absolute() else (plan_dir / src).resolve()
+        if not src.exists():
+            raise Problem(f"Custom motion graphic: can't find {src}.")
+        html = f'<script>window.__davnaiCurrent="{mid}";</script><div {attrs} class="g custom">{src.read_text(encoding="utf-8")}</div>'
+        return html, f'(window.__davnaiQueue["{mid}"]||[]).forEach(fn=>fn(tl,document.getElementById("{mid}"),{t0:.3f},{dur:.3f},window.BRAND));'
+    raise Problem(f"Unknown motion graphic '{kind}'. Use: {', '.join(MOTION_TYPES)}.")
+
+
+def motion_css(w: int, h: int, look: dict) -> str:
+    u = min(w, h) / 100
+    face = f'@font-face{{font-family:"DavnaiBrand";src:url("{look["font_file"]}");font-weight:100 900}}' if look["font_file"] else ""
+    family = '"DavnaiBrand",' if look["font_file"] else ""
+    p, s, a, t = look["primary"], look["secondary"], look["accent"], look["text"]
+    return f"""{face}
+html,body{{margin:0;background:#000}}
+#stage{{position:relative;width:{w}px;height:{h}px;overflow:hidden;font-family:{family}"{look['font']}",Arial,sans-serif;font-weight:800;color:{t}}}
+video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
+.g{{position:absolute}}
+.box{{display:inline-block;background:{p};color:{t};border-radius:{round(2.2 * u)}px;padding:{round(1.2 * u)}px {round(2.6 * u)}px;box-shadow:0 {round(u)}px {round(3 * u)}px rgba(0,0,0,.35)}}
+.title{{font-size:{round(8 * u)}px;line-height:1.1;font-weight:900}}
+.title .w,.title .c{{display:inline-block}}
+.callout{{font-size:{round(5.5 * u)}px;background:{a};color:#111}}
+.emoji{{font-size:{round(16 * u)}px}}
+.lt-bar{{width:{round(48 * u)}px;height:{round(1.2 * u)}px;background:{a};margin-bottom:{round(1.2 * u)}px}}
+.lt-name{{display:inline-block;background:{p};padding:{round(u)}px {round(2 * u)}px;font-size:{round(5.5 * u)}px}}
+.lt-role{{display:block;width:max-content;background:{s};padding:{round(0.7 * u)}px {round(2 * u)}px;font-size:{round(3.6 * u)}px;font-weight:600}}
+.num{{font-size:{round(14 * u)}px;font-weight:900;color:{t};text-shadow:0 {round(0.6 * u)}px {round(2 * u)}px rgba(0,0,0,.5)}}
+.num .v{{color:{a}}}
+.label{{font-size:{round(4.5 * u)}px;font-weight:700}}
+.panel{{background:rgba(17,17,17,.82);border-radius:{round(3 * u)}px;padding:{round(3 * u)}px;border-left:{round(u)}px solid {p}}}
+.list-title{{font-size:{round(5.5 * u)}px;margin-bottom:{round(1.5 * u)}px;color:{a}}}
+.row{{font-size:{round(4.6 * u)}px;margin:{round(1.2 * u)}px 0;font-weight:700}}
+.tick{{display:inline-block;width:{round(6 * u)}px;color:{p}}}
+.chart{{display:flex;align-items:flex-end;gap:{round(2.5 * u)}px;height:{round(40 * u)}px}}
+.col{{flex:1;text-align:center}}
+.bar{{background:{p};border-radius:{round(u)}px {round(u)}px 0 0}}
+.val{{font-size:{round(3.6 * u)}px;margin-bottom:{round(0.6 * u)}px}}
+.lab{{font-size:{round(3.2 * u)}px;margin-top:{round(0.6 * u)}px;font-weight:600}}
+.full{{inset:0;background:{p};display:flex;align-items:center;justify-content:center;text-align:center}}
+.full-in{{padding:0 {round(8 * u)}px}}
+.quote{{font-size:{round(7 * u)}px;line-height:1.2}}
+.author{{font-size:{round(4 * u)}px;margin-top:{round(3 * u)}px;color:{a}}}
+.chap-num{{font-size:{round(22 * u)}px;color:{a};line-height:1}}
+.chap-title{{font-size:{round(8 * u)}px}}
+.handle{{font-size:{round(5 * u)}px;margin-top:{round(2 * u)}px;color:{a}}}
+.btn{{display:inline-block;margin-top:{round(4 * u)}px;background:{t};color:{p};border-radius:{round(5 * u)}px;padding:{round(1.6 * u)}px {round(6 * u)}px;font-size:{round(5 * u)}px}}
+.logo{{max-width:{round(30 * u)}px;max-height:{round(16 * u)}px;margin-bottom:{round(3 * u)}px}}
+"""
+
+
+def merge_windows(spans: list[tuple[float, float, int]]) -> list[tuple[float, float, list[int]]]:
+    """Graphics whose times overlap are rendered together (pure)."""
+    groups: list[tuple[float, float, list[int]]] = []
+    for a, b, k in sorted(spans):
+        if groups and a <= groups[-1][1] + 0.05:
+            ga, gb, ks = groups[-1]
+            groups[-1] = (ga, max(gb, b), ks + [k])
+        else:
+            groups.append((a, b, [k]))
+    return groups
+
+
+def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int, fps: float, final: bool, folder: Path, stem: str, plan_dir: Path) -> None:
+    """Adds the plan's motion graphics. Only the moments with graphics go through HyperFrames (headless Chrome), as
+    short full-frame segments of this very video, which ffmpeg then lays back in place: long videos stay fast."""
+    cli = hyperframes_cmd()
+    gsap = MOTION_DIR / "node_modules" / "gsap" / "dist" / "gsap.min.js"
+    if not gsap.exists():
+        raise Problem("GSAP is missing. Run: python davnai.py setup --motion")
+    total = probe(out)["seconds"]
+    look = brand_look(brand)
+    items = cfg["motion"]
+    spans = [(*item_window(item, timing, total), k) for k, item in enumerate(items)]
+    base = out.with_name(out.stem + "_base" + out.suffix)
+    out.replace(base)
+    work = folder / f"{stem}_motion"
+    shutil.rmtree(work, ignore_errors=True)
+    segments = []
+    try:
+        for g, (a, b, ks) in enumerate(merge_windows(spans)):
+            project = work / f"seg{g}"
+            project.mkdir(parents=True)
+            shutil.copy2(gsap, project / "gsap.min.js")
+            if look["font_file"]:
+                (project / "fonts").mkdir(exist_ok=True)
+                shutil.copy2(BRAND_DIR / look["font_file"], project / look["font_file"])
+            parts, anims = [], []
+            for k in ks:
+                ia, ib, _ = spans[k]
+                html, js = motion_item(k, items[k], ia - a, ib - ia, w, h, look, plan_dir, project)
+                parts.append(html)
+                anims.append(js)
+            base_rel = os.path.relpath(base, project).replace("\\", "/")
+            page = f"""<!doctype html><html><head><meta charset="utf-8"><style>{motion_css(w, h, look)}</style>
+<script>window.BRAND={json.dumps({**look, "width": w, "height": h})};window.__davnaiQueue={{}};window.registerDavnai=function(fn){{(window.__davnaiQueue[window.__davnaiCurrent]=window.__davnaiQueue[window.__davnaiCurrent]||[]).push(fn);}};</script>
+</head><body>
+<div id="stage" data-composition-id="main" data-start="0" data-width="{w}" data-height="{h}" data-fps="{fps:g}">
+<video class="base" data-start="0" data-duration="{b - a:.3f}" data-media-start="{a:.3f}" src="{esc(base_rel)}" muted playsinline></video>
+{''.join(parts)}
+<script src="gsap.min.js"></script>
+<script>const tl=gsap.timeline({{paused:true}});{''.join(anims)}window.__timelines={{main:tl}};</script>
+</div></body></html>"""
+            (project / "index.html").write_text(page, encoding="utf-8")
+            seg = work / f"seg{g}.mp4"
+            proc = subprocess.run([*cli, "render", str(project), "-o", str(seg), "-q", "looks" if final else "draft", "-f", f"{fps:g}", "--quiet"], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+            if proc.returncode != 0 or not seg.exists():
+                tail = "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-8:])
+                raise Problem(f"HyperFrames couldn't render the graphics at {a:.1f}s:\n{tail}\n(The page is in {project}; `hyperframes preview` there shows it.)")
+            segments.append((a, seg))
+        inputs = ["-i", str(base)]
+        chain, label = [], "0:v"
+        for g, (a, seg) in enumerate(segments):
+            inputs += ["-itsoffset", f"{a:.3f}", "-i", str(seg)]
+            chain.append(f"[{label}][{g + 1}:v]overlay=0:0:eof_action=pass[o{g}]")
+            label = f"o{g}"
+        quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", "-map", "0:a?", *quality, "-c:a", "copy", "-movflags", "+faststart", str(out)])
+        base.unlink(missing_ok=True)
+        if final:
+            shutil.rmtree(work, ignore_errors=True)
+    except BaseException:
+        if not out.exists() and base.exists():
+            base.replace(out)
+        raise
+
+
+# ---------------------------------------------------------------- storyboard
+
+
+def scene_list(cfg: dict, plan: dict, plan_dir: Path) -> tuple[list[dict], float]:
+    """The output's scenes (keep parts, or faceless scenes) with what's said and what happens on screen."""
+    def resolve(p: str) -> Path:
+        q = Path(str(p)).expanduser()
+        return q if q.is_absolute() else (plan_dir / q).resolve()
+
+    def happens(first: int, last: int) -> list[str]:
+        notes = []
+        inside = lambda rng: isinstance(rng, (list, tuple)) and len(rng) == 2 and int(rng[0]) <= last and int(rng[1]) >= first  # noqa: E731
+        for z in cfg.get("zoom") or []:
+            if inside(z.get("lines")):
+                notes.append(f"zoom {z.get('style', 'punch')}")
+        for b in cfg.get("broll") or []:
+            if inside(b.get("lines")):
+                notes.append(f"{b.get('mode', 'B-roll')}: {Path(str(b.get('clip', ''))).name}")
+        for t in cfg.get("texts") or []:
+            if inside(t.get("lines")):
+                notes.append(f"text \"{t.get('text', '')}\"")
+        for m in cfg.get("motion") or []:
+            rng = m.get("lines")
+            rng = [rng, rng] if isinstance(rng, int) else rng
+            if inside(rng):
+                notes.append(f"{m.get('type')}: {m.get('text') or m.get('name') or m.get('title') or ''}".rstrip(": "))
+        for s in cfg.get("sfx") or []:
+            if s.get("line") is not None and first <= int(s["line"]) <= last:
+                notes.append(f"sound: {Path(str(s.get('file', ''))).name}")
+        return notes
+
+    scenes = []
+    if cfg.get("scenes"):
+        voice = resolve(cfg.get("voice") or "")
+        lines = load_transcript(voice)["lines"]
+        for k, sc in enumerate(cfg["scenes"]):
+            a, b = int(sc["lines"][0]), int(sc["lines"][1])
+            said = " ".join(w[0] for n in range(a, b + 1) for w in line_by_id(lines, n)["words"])
+            clip = resolve(sc.get("clip") or "")
+            scenes.append({"n": k + 1, "lines": f"{a}-{b}", "seconds": line_by_id(lines, b)["end"] - line_by_id(lines, a)["start"], "said": said, "picture": clip, "at": float(sc.get("start", 0)), "notes": [f"clip: {clip.name}", *happens(a, b)]})
+        return scenes, probe(voice)["seconds"]
+    source = resolve(cfg.get("source") or plan.get("source") or "")
+    info = probe(source)
+    lines = load_transcript(source)["lines"]
+    src_words = [[w[0], w[1], w[2], ln["id"]] for ln in lines for w in ln["words"]]
+    pieces = []
+    for g, item in enumerate(cfg.get("keep") or []):
+        spans = keep_spans(lines, [item], info["seconds"])
+        if cfg.get("tighten"):
+            spans = tighten(spans, src_words)
+        pieces += [{"s": s, "e": e, "group": g} for s, e in spans]
+    timeline = Timeline(pieces, cfg.get("transition"), min(2.0, max(0.5, float(cfg.get("speed", 1.0)))))
+    for k, group in enumerate(timeline.groups):
+        ids = sorted({w[3] for w in src_words if any(p["s"] <= (w[1] + w[2]) / 2 <= p["e"] for p in group)})
+        if not ids:
+            continue
+        said = " ".join(w[0] for w in src_words if any(p["s"] <= (w[1] + w[2]) / 2 <= p["e"] for p in group))
+        first = line_by_id(lines, ids[0])
+        scenes.append({"n": k + 1, "lines": f"{ids[0]}-{ids[-1]}", "seconds": timeline.lengths[k], "said": said, "picture": source, "at": (first["start"] + first["end"]) / 2, "notes": happens(ids[0], ids[-1])})
+    return scenes, timeline.duration
+
+
+def still_b64(path: Path, at: float) -> str:
+    if path.suffix.lower() in IMAGE_EXT:
+        args = ["-i", str(path)]
+    else:
+        args = ["-ss", f"{max(0.0, at):.3f}", "-i", str(path)]
+    proc = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", *args, "-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "5", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return base64.b64encode(proc.stdout).decode() if proc.returncode == 0 and proc.stdout else ""
+
+
+def cmd_storyboard(args) -> None:
+    need("ffmpeg")
+    plan_path = Path(args.plan).expanduser().resolve()
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    outputs = [o for o in plan.get("outputs", []) if not args.only or o.get("name") in args.only]
+    if not outputs:
+        raise Problem("The plan has no outputs to storyboard.")
+    cards_html, text = [], []
+    for cfg in outputs:
+        name = cfg.get("name") or "video"
+        scenes, total = scene_list(cfg, plan, plan_path.parent)
+        extras = [x for x in ("hook_text", "captions", "auto_zoom", "progress_bar", "end_card", "music", "intro", "outro", "logo") if cfg.get(x)]
+        text.append(f"Storyboard: {name} ({cfg.get('aspect', '9:16')}, about {total:.0f}s){' · ' + ', '.join(extras) if extras else ''}")
+        if cfg.get("hook_text"):
+            text.append(f"  Opens with: \"{cfg['hook_text']}\"")
+        if cfg.get("transition"):
+            text.append(f"  Between scenes: {cfg['transition']}")
+        cards = []
+        for sc in scenes:
+            said = sc["said"] if len(sc["said"]) <= 140 else sc["said"][:137] + "..."
+            notes = "; ".join(sc["notes"])
+            text.append(f"  {sc['n']}. lines {sc['lines']} ({sc['seconds']:.1f}s): \"{said}\"" + (f" [{notes}]" if notes else ""))
+            img = still_b64(sc["picture"], sc["at"]) if sc["picture"].exists() else ""
+            img_html = '<img src="data:image/jpeg;base64,' + img + '">' if img else ""
+            notes_html = '<div class="notes">' + esc(notes) + "</div>" if notes else ""
+            cards.append(f'<div class="card">{img_html}<div class="meta"><b>{sc["n"]}</b> · lines {esc(sc["lines"])} · {sc["seconds"]:.1f}s</div>'
+                         f'<div class="said">“{esc(said)}”</div>{notes_html}</div>')
+        cards_html.append(f'<h2>{esc(name)} <span>{esc(cfg.get("aspect", "9:16"))} · about {total:.0f}s{(" · " + esc(", ".join(extras))) if extras else ""}</span></h2>'
+                          + (f'<p class="hook">Opens with: “{esc(cfg["hook_text"])}”</p>' if cfg.get("hook_text") else "") + f'<div class="grid">{"".join(cards)}</div>')
+    page = f"""<!doctype html><html><head><meta charset="utf-8"><title>Storyboard</title><style>
+body{{font-family:system-ui,Arial,sans-serif;margin:24px;background:#f6f6f8;color:#111}}h1{{margin:0 0 8px}}h2{{margin:28px 0 8px}}h2 span{{font-weight:400;color:#666;font-size:14px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}}.card{{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
+.card img{{width:100%;display:block;background:#000;aspect-ratio:16/9;object-fit:cover}}.meta{{padding:8px 10px 0;font-size:13px;color:#444}}.said{{padding:4px 10px;font-size:14px}}
+.notes{{padding:0 10px 10px;font-size:12px;color:#5b4bdb}}.hook{{color:#5b4bdb}}</style></head><body><h1>Storyboard</h1><p>Check the order and what happens in each scene before the preview is made.</p>{''.join(cards_html)}</body></html>"""
+    out = plan_path.with_name(plan_path.stem + "_storyboard.html")
+    out.write_text(page, encoding="utf-8")
+    say(*text, f"Picture storyboard: {out}", "Show the person this list (and the page), and change the plan until they approve it. Then render.")
+
+
+# ---------------------------------------------------------------- setup and voice
+
+
+def node_major() -> int:
+    node = shutil.which("node")
+    if not node:
+        return 0
+    out = subprocess.run([node, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+    m = re.match(r"v(\d+)", out.strip())
+    return int(m.group(1)) if m else 0
+
+
+def install_hint(tool: str) -> list[str] | None:
+    """The command that installs a tool on this computer (Windows winget, Mac Homebrew), or None to install by hand."""
+    if sys.platform == "win32" and shutil.which("winget"):
+        ids = {"ffmpeg": "Gyan.FFmpeg", "node": "OpenJS.NodeJS.LTS"}
+        return ["winget", "install", "-e", "--id", ids[tool], "--accept-source-agreements", "--accept-package-agreements"]
+    if sys.platform == "darwin" and shutil.which("brew"):
+        return ["brew", "install", {"ffmpeg": "ffmpeg", "node": "node"}[tool]]
+    return None
+
+
+def ask(question: str, yes: bool) -> bool:
+    if yes:
+        return True
+    try:
+        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def cmd_setup(args) -> None:
+    lines, restart = [], False
+    pip = [sys.executable, "-m", "pip", "install", "--user", "--quiet", "faster-whisper", "fonttools", "brotli"]
+    say("Installing the Python parts (speech-to-text, brand fonts)...")
+    proc = subprocess.run(pip, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0 and "externally-managed" in (proc.stderr or ""):
+        proc = subprocess.run([*pip, "--break-system-packages"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    lines.append("✓ Python parts" if proc.returncode == 0 else f"✗ Python parts: {(proc.stderr or '').strip().splitlines()[-1:]}")
+    needed = ["ffmpeg"] + (["node"] if args.motion and node_major() < 22 else [])
+    for tool in needed:
+        if tool == "ffmpeg" and shutil.which("ffmpeg") and shutil.which("ffprobe"):
+            lines.append("✓ ffmpeg")
+            continue
+        hint = install_hint(tool)
+        label = "Node.js 22 or newer" if tool == "node" else "ffmpeg"
+        if hint and ask(f"Install {label} with: {' '.join(hint)}?", args.yes):
+            ok = subprocess.run(hint).returncode == 0
+            restart = restart or (ok and sys.platform == "win32")
+            lines.append(f"✓ {label} installed" if ok else f"✗ {label} didn't install. Try: {' '.join(hint)}")
+        elif not hint:
+            lines.append(f"✗ {label}: install it from {'https://nodejs.org' if tool == 'node' else 'https://ffmpeg.org/download.html'} (Linux: sudo apt install {'nodejs' if tool == 'node' else 'ffmpeg'})")
+        else:
+            lines.append(f"· {label} skipped")
+    if args.motion:
+        npm = shutil.which("npm")
+        if node_major() >= 22 and npm:
+            MOTION_DIR.mkdir(parents=True, exist_ok=True)
+            say("Installing HyperFrames and GSAP for motion graphics...")
+            ok = subprocess.run([npm, "install", "--prefix", str(MOTION_DIR), "hyperframes@~0.9", "gsap@^3", "--no-audit", "--no-fund", "--silent"], env={**os.environ, **NO_TRACKING}).returncode == 0
+            if ok:
+                say("Getting the browser HyperFrames renders with (once)...")
+                ok = subprocess.run([*hyperframes_cmd(), "browser", "ensure"], env={**os.environ, **NO_TRACKING}, stdout=subprocess.DEVNULL).returncode == 0
+            lines.append("✓ motion graphics (HyperFrames)" if ok else "✗ motion graphics: HyperFrames didn't install; run setup --motion again")
+        elif restart:
+            lines.append("· Node.js was just installed: open a new terminal and run setup --motion again to finish")
+        else:
+            lines.append("✗ motion graphics need Node.js 22 or newer first")
+    say(*lines)
+    if restart:
+        say("Windows only finds newly installed programs in a new terminal: close this one and run `python davnai.py check` in a new one.")
+
+
+def cmd_voice(args) -> None:
+    """A voice-over made on this computer with HyperFrames' free Kokoro voices (for faceless videos)."""
+    out = Path(args.output).expanduser().resolve()
+    text_arg = ["--text-file", str(Path(args.text).expanduser().resolve())] if Path(args.text).expanduser().exists() else [args.text]
+    proc = subprocess.run([*hyperframes_cmd(), "tts", *text_arg, "-o", str(out), "-v", args.voice, "-s", str(args.speed)], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not out.exists():
+        raise Problem("The voice wasn't made:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-6:]))
+    say(f"Voice-over saved: {out} ({probe(out)['seconds']:.1f}s). Next: davnai.py transcribe \"{out}\"")
 
 
 def cmd_render(args) -> None:
@@ -1043,6 +1550,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--only", nargs="*", help="only these output names")
     p.add_argument("--from-version", type=int, help="render an earlier version's plan again")
     p.set_defaults(fn=cmd_render)
+    p = sub.add_parser("storyboard", help="the scene list and a picture page to approve before rendering")
+    p.add_argument("plan")
+    p.add_argument("--only", nargs="*", help="only these output names")
+    p.set_defaults(fn=cmd_storyboard)
+    p = sub.add_parser("setup", help="install what's missing (asks first unless --yes)")
+    p.add_argument("--motion", action="store_true", help="also Node.js, HyperFrames and GSAP for motion graphics")
+    p.add_argument("--yes", action="store_true", help="don't ask (the person already said yes)")
+    p.set_defaults(fn=cmd_setup)
+    p = sub.add_parser("voice", help="a free voice-over made on this computer (needs setup --motion)")
+    p.add_argument("text", help="the words, or a .txt file")
+    p.add_argument("-o", "--output", default="voiceover.wav")
+    p.add_argument("--voice", default="af_heart", help="e.g. af_heart, am_michael, bf_emma, bm_george")
+    p.add_argument("--speed", type=float, default=1.0)
+    p.set_defaults(fn=cmd_voice)
     p = sub.add_parser("probe", help="size and length for upload_from_computer")
     p.add_argument("file")
     p.set_defaults(fn=cmd_probe)

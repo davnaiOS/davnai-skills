@@ -9,6 +9,9 @@ Skills that teach your AI (Claude, ChatGPT and Codex, Gemini, Cursor and other a
 - **Faceless videos** from stock clips or pictures and a voice-over.
 - **Your brand everywhere:** captions in your Brand Kit style, your logo, your own intro and outro.
 - **Effects:** animated captions, hook titles, text callouts, auto zoom, transitions, B-roll and picture-in-picture, blurred backgrounds, colour looks, progress bars, sound effects, music, end cards.
+- **Motion graphics** with [HyperFrames](https://github.com/heygen-com/hyperframes): animated titles, lower thirds, callouts, counters, lists, charts, quote and chapter cards, end screens, or anything your AI writes in HTML, all in your brand.
+- **Storyboard first:** a scene-by-scene plan and a picture page to approve before anything is rendered.
+- **Free voice-overs** made on your computer for faceless videos.
 - **You approve everything:** quick previews first, the final only when you say so, and posts wait for your OK in Davnai.
 - **Cheaper:** the editing runs on your computer with free tools (ffmpeg and a local speech model), and the AI picks moments by line number instead of guessing times, so it uses far fewer tokens.
 
@@ -27,20 +30,20 @@ Skills that teach your AI (Claude, ChatGPT and Codex, Gemini, Cursor and other a
 
 ## What you need
 
-- Python 3.9 or newer and [ffmpeg](https://ffmpeg.org/download.html) (Windows: `winget install ffmpeg`; Mac: `brew install ffmpeg`).
-- `pip install faster-whisper` for transcripts (runs on your computer; the first run downloads a speech model).
-- Optional: `pip install fonttools brotli` for the exact Brand Kit caption fonts.
+Your AI sets this up for you: it runs `python davnai.py check`, asks you, then `python davnai.py setup` installs what's missing (ffmpeg, the speech-to-text model and the brand fonts; add `--motion` for motion graphics, which adds Node.js, HyperFrames and GSAP).
+
+- Python 3.9 or newer (Windows: `winget install -e --id Python.Python.3.12`; Mac: `brew install python`).
+- [ffmpeg](https://ffmpeg.org/download.html) and `faster-whisper` (installed by `setup`; transcripts run on your computer, and the first one downloads a speech model).
+- Optional, for motion graphics and voice-overs: Node.js 22+ and HyperFrames (`setup --motion`, a few hundred MB).
 - An AI app that can run commands on your computer (Claude Code, Claude desktop with a folder, Codex, Gemini CLI, Cursor). In ChatGPT or Claude in the browser, upload your video with Davnai's upload card and Davnai edits it instead.
 - A [Davnai](https://davnai.com) account (free to start) to post, schedule and automate.
-
-Run `python skills/davnai-video/scripts/davnai.py check` to see what's missing.
 
 ## What's inside
 
 ```
 skills/davnai-video/
   SKILL.md            the steps and rules your AI follows
-  reference/          Shorts, long edits, faceless videos, captions, effects, stock, uploading
+  reference/          Shorts, long edits, faceless videos, captions, effects, motion graphics, stock, uploading
   scripts/davnai.py   the editing script (Python + ffmpeg)
 .claude-plugin/       Claude Code plugin and marketplace
 .mcp.json             connects Davnai (https://davnai.com/mcp)
@@ -52,6 +55,10 @@ Your originals are never changed: everything goes in a `<video>.davnai` folder n
 ## Privacy
 
 Your videos are edited on your computer. Only the final you choose to upload goes to Davnai. The Brand Kit download link lasts one hour and only reads your own Brand Kit.
+
+## Third-party tools
+
+Setup installs tools under their own licences: ffmpeg (LGPL/GPL), faster-whisper (MIT), HyperFrames (Apache 2.0), GSAP (GreenSock's free licence) and the Kokoro voices (Apache 2.0). HyperFrames usage data is switched off when the script runs it.
 
 ## Licence
 

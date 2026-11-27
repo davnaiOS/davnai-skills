@@ -1,6 +1,6 @@
 # Effects
 
-Add these to an output in `plan.json`. Lines are transcript line numbers (never times). Use a few that fit the video; more isn't better. Captions, a strong hook and pace matter most; the rest is seasoning.
+Animated graphics (titles, lower thirds, counters, lists, charts, end screens) are in `motion.md`. Add these to an output in `plan.json`. Lines are transcript line numbers (never times). Use a few that fit the video; more isn't better. Captions, a strong hook and pace matter most; the rest is seasoning.
 
 | What | In the plan | Notes |
 |---|---|---|

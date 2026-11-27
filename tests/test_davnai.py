@@ -155,3 +155,44 @@ def test_render_preview_versions_and_final(tmp_path, monkeypatch):
     info = davnai.probe(folder / "s1_final.mp4")
     assert (info["width"], info["height"]) == (1080, 1920)
     assert video.stat().st_size == st.st_size  # the original is never changed
+
+
+def test_motion_windows_come_from_lines_and_merge():
+    timing = {"offset": 1.0, "main": 10.0, "lines": {"1": [1.2, 2.0], "2": [2.4, 3.9], "5": [7.0, 8.0]}}
+    assert davnai.item_window({"type": "title", "lines": [1, 2]}, timing, 11) == pytest.approx((1.1, 4.2))
+    assert davnai.item_window({"type": "end_screen", "at": "end", "seconds": 2}, timing, 11) == pytest.approx((9.0, 11.0))
+    assert davnai.item_window({"type": "title", "at": "start"}, timing, 11) == pytest.approx((0.0, 3.0))
+    with pytest.raises(davnai.Problem):
+        davnai.item_window({"type": "title", "lines": [3, 4]}, timing, 11)  # cut lines
+    assert davnai.merge_windows([(0, 2, 0), (1.5, 3, 1), (5, 6, 2)]) == [(0, 3, [0, 1]), (5, 6, [2])]
+
+
+def test_motion_graphics_are_brand_coloured_seekable_html(tmp_path):
+    look = davnai.brand_look({"colours": [{"hex": "#123456"}], "captions": {"font_family": "Inter"}})
+    assert look["primary"] == "#123456"
+    for item in [{"type": "title", "text": "Hi there", "style": s} for s in ("pop", "slide", "bounce", "words", "typewriter", "glow")] + [
+        {"type": "lower_third", "name": "A", "role": "B"}, {"type": "callout", "text": "Free"}, {"type": "emoji", "emoji": "🔥"},
+        {"type": "counter", "from": 0, "to": 9}, {"type": "list", "items": ["a", "b"]}, {"type": "chart", "bars": [{"label": "x", "value": 3}]},
+        {"type": "quote", "text": "q"}, {"type": "chapter", "number": 1, "text": "c"}, {"type": "end_screen"},
+    ]:
+        html, js = davnai.motion_item(0, item, 1.0, 2.0, 540, 960, look, tmp_path, tmp_path)
+        assert 'data-start="1.000"' in html and "tl." in js, item
+    assert "<script>" not in davnai.motion_item(0, {"type": "title", "text": "<script>x</script>"}, 0, 1, 540, 960, look, tmp_path, tmp_path)[0]
+    with pytest.raises(davnai.Problem):
+        davnai.motion_item(0, {"type": "nope"}, 0, 1, 540, 960, look, tmp_path, tmp_path)
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_storyboard_lists_scenes_and_writes_a_picture_page(tmp_path, capsys):
+    video = tmp_path / "talk.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "12", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(video)], check=True)
+    folder = davnai.workdir(video)
+    st = video.stat()
+    (folder / "transcript.json").write_text(json.dumps({"stamp": {"size": st.st_size, "mtime": int(st.st_mtime)}, "seconds": 12, "lines": davnai.split_lines(fake_words())}))
+    plan = folder / "plan.json"
+    plan.write_text(json.dumps({"source": "../talk.mp4", "outputs": [{"name": "s1", "keep": [[3, 4], [1, 1]], "hook_text": "Hook", "motion": [{"type": "lower_third", "name": "Ada", "lines": [3, 3]}]}]}))
+    assert davnai.main(["storyboard", str(plan)]) == 0
+    out = capsys.readouterr().out
+    assert "1. lines 3-4" in out and "lower_third: Ada" in out and "Opens with: \"Hook\"" in out
+    page = (folder / "plan_storyboard.html").read_text()
+    assert page.count('class="card"') == 2 and "data:image/jpeg;base64," in page
