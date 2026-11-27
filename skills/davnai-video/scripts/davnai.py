@@ -9,6 +9,7 @@ Commands (python davnai.py <command> --help for details):
   themes                    the built-in themes (12)
   storyboard <plan.json>    the scenes to approve before rendering (and a picture page)
   qc <video>                quality checks (also run after every render)
+  catalog [words]           search HyperFrames' 448 ready-made pieces; catalog-get <name> to adapt one
   render <plan.json>        previews (v1, v2, ...); --final for full quality; motion graphics via HyperFrames
   setup [--motion]          install what's missing (asks first; --yes when the person already agreed)
   voice "<text>"            a free voice-over made on this computer (faceless videos)
@@ -34,7 +35,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -828,7 +829,7 @@ def ass_text(t: str) -> str:
     return t.replace("{", "(").replace("}", ")").replace("\\", "/").replace("\n", "\\N")
 
 
-def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words: list[list], duration: float) -> bool:
+def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words: list[list], duration: float, quiet: list[tuple[float, float]] = ()) -> bool:
     """Captions (Brand Kit style), the hook title and text callouts, all in one subtitle file."""
     caps = brand.get("captions") or {}
     look = {**DEFAULT_STYLE, **(caps.get("look") or {})}
@@ -875,6 +876,8 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
 
         for group in caption_groups(words, per_line):
             start, end = group[0][1], max(group[-1][2], group[0][1] + 0.3)
+            if any(a - 0.05 <= start <= b for a, b in quiet):
+                continue  # no captions while big words sit behind the person
             intro = glow + ANIM_TAGS.get(anim, "")
             if anim == "type":
                 for k, w in enumerate(group):
@@ -1031,6 +1034,12 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             if not isinstance(rng, (list, tuple)) or len(rng) != 2:
                 raise Problem(f"Scene {k + 1} needs \"lines\": [first, last].")
             starts.append(0.0 if k == 0 else line_by_id(lines, rng[0])["start"])
+        if cfg.get("beat_cuts") and cfg.get("music"):
+            beats = beats_of(resolve(cfg["music"]), vinfo["seconds"])
+            for k in range(1, len(starts)):  # scene changes land on the nearest beat (within 0.3 s)
+                near = min(beats, key=lambda bt: abs(bt - starts[k]), default=None)
+                if near is not None and abs(near - starts[k]) <= 0.3 and near > starts[k - 1] + 0.5:
+                    starts[k] = near
         ends = starts[1:] + [vinfo["seconds"]]
         if kind and min(e - s for s, e in zip(starts, ends)) < fade * 2.5:
             kind, fade = None, 0.0
@@ -1121,11 +1130,21 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             auto_sounds += [(g[0]["out"], joins_sound) for g in timeline.groups[1:]]
 
     label = "vbase"
+    if cfg.get("split"):
+        part, label = split_graph(label, cfg, w, h, fps, main_len, add_input, resolve)
+        graph += part
+        cfg.setdefault("caption_position", "middle")
     if cfg.get("look"):
         if cfg["look"] not in LOOKS:
             raise Problem(f"Unknown look '{cfg['look']}'. Use: {', '.join(LOOKS)}.")
         graph.append(f"[{label}]{LOOKS[cfg['look']]}[vlook]")
         label = "vlook"
+    part, label = fx_graph(label, cfg, words, main_len, w, h, fps)
+    graph += part
+    if cfg.get("beat_pulse") and cfg.get("music"):
+        part, label = beat_pulse(label, beats_of(resolve(cfg["music"]), main_len), w, h, fps, float(cfg.get("beat_amount", 0.04)))
+        graph += part
+    behind = behind_windows(cfg, words, main_len)
     for k, item in enumerate(cfg.get("broll") or []):  # cutaways, picture-in-picture and stickers over the main video
         rng = item.get("lines")
         window = line_window(words, int(rng[0]), int(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
@@ -1160,7 +1179,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             graph.append(f"[{label}][b{k}]overlay={spot}:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[vb{k}]")
         label = f"vb{k}"
     ass = folder / f"{name}_v{version}.ass"
-    if write_ass(ass, w, h, cfg, brand, words, main_len):
+    if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, _ in behind]):
         fonts = folder / "fonts"
         fonts.mkdir(exist_ok=True)
         graph.append(f"[{label}]ass={ass.name}:fontsdir=fonts[vcap]")
@@ -1254,6 +1273,8 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         win[0], win[1] = min(win[0], wd[1]), max(win[1], wd[2])
     timing = {"offset": intro_len, "main": main_len, "lines": {str(k): [round(a + intro_len, 3), round(b + intro_len, 3)] for k, (a, b) in windows.items()}}
     (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
+    if behind:
+        apply_behind(out, behind, brand, w, h, final, folder, f"{name}_v{version}", intro_len)
     if cfg.get("motion"):
         apply_motion(out, cfg, brand, timing, w, h, fps, final, folder, f"{name}_v{version}", plan_dir)
     checks = quality_checks(out, cfg, brand) if (final or main_len <= 180) and cfg.get("checks", True) else []
@@ -1264,7 +1285,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
 
 MOTION_DIR = BRAND_DIR.parent / "motion"
 NO_TRACKING = {"HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1"}  # the person's renders stay private
-MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "custom")
+MOTION_TYPES = ("title", "lower_third", "callout", "emoji", "counter", "list", "chart", "quote", "chapter", "end_screen", "block", "custom")
 
 
 def hyperframes_cmd() -> list[str]:
@@ -1433,6 +1454,8 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
               f'.from("#{mid} .full-in > *",{{y:{round(6 * u)},autoAlpha:0,duration:0.4,stagger:0.12,ease:"back.out(1.8)"}},{t0 + 0.2:.3f})'
               f'.to("#{mid} .btn",{{scale:1.08,yoyo:true,repeat:{max(1, int(dur / 0.6))},duration:0.3}},{t0 + 1.0:.3f});')
         return html, js
+    if kind == "block":
+        return motion_block(mid, item, t0, dur, w, h, plan_dir, project)
     if kind == "custom":
         src = Path(str(item.get("html", ""))).expanduser()
         src = src if src.is_absolute() else (plan_dir / src).resolve()
@@ -1441,6 +1464,44 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
         html = f'<script>window.__davnaiCurrent="{mid}";</script><div {attrs} class="g custom">{src.read_text(encoding="utf-8")}</div>'
         return html, f'(window.__davnaiQueue["{mid}"]||[]).forEach(fn=>fn(tl,document.getElementById("{mid}"),{t0:.3f},{dur:.3f},window.BRAND));'
     raise Problem(f"Unknown motion graphic '{kind}'. Use: {', '.join(MOTION_TYPES)}.")
+
+
+def motion_block(mid: str, item: dict, t0: float, dur: float, w: int, h: int, plan_dir: Path, project: Path) -> tuple[str, str]:
+    """A whole HyperFrames catalog scene, by name (as it comes) or from your edited copy ("html"), fitted to the video."""
+    comps = project / "compositions"
+    comps.mkdir(exist_ok=True)
+    if item.get("html"):
+        src = Path(str(item["html"])).expanduser()
+        src = src if src.is_absolute() else (plan_dir / src).resolve()
+        if not src.exists():
+            raise Problem(f"Block: can't find {src}.")
+        target = comps / src.name
+        shutil.copy2(src, target)
+        assets = src.parent / "assets"
+        if assets.is_dir():
+            shutil.copytree(assets, project / "assets", dirs_exist_ok=True)
+    elif item.get("name"):
+        proc = subprocess.run([*hyperframes_cmd(), "add", str(item["name"]), "--dir", str(project), "--json", "--no-clipboard"], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        try:
+            written = [Path(p) for p in json.loads(proc.stdout).get("written", []) if str(p).endswith(".html")]
+        except json.JSONDecodeError:
+            written = []
+        if not written:
+            raise Problem(f"Couldn't get the catalog block '{item['name']}' (davnai.py catalog lists them).")
+        target = written[0]
+    else:
+        raise Problem("A block needs \"name\" (from davnai.py catalog) or \"html\" (your edited copy).")
+    page = target.read_text(encoding="utf-8")
+    cid = (re.search(r'data-composition-id="([^"]+)"', page) or [None, mid])[1]
+    bw = int((re.search(r'data-width="(\d+)"', page) or [None, 1080])[1])
+    bh = int((re.search(r'data-height="(\d+)"', page) or [None, 1920])[1])
+    scale = (max if item.get("fit") == "cover" else min)(w / bw, h / bh)
+    left, top = round((w - bw * scale) / 2), round((h - bh * scale) / 2)
+    values = f" data-variable-values='{esc(json.dumps(item['vars']))}'" if item.get("vars") else ""
+    rel = os.path.relpath(target, project).replace("\\", "/")
+    html = (f'<div id="{mid}" data-composition-id="{esc(cid)}" data-composition-src="{esc(rel)}" data-start="{t0:.3f}" data-duration="{dur:.3f}" data-width="{bw}" data-height="{bh}"{values} '
+            f'style="position:absolute;left:{left}px;top:{top}px;width:{bw}px;height:{bh}px;transform:scale({scale:.4f});transform-origin:0 0"></div>')
+    return html, ""
 
 
 def motion_css(w: int, h: int, look: dict) -> str:
@@ -1576,6 +1637,233 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
         raise
 
 
+# ---------------------------------------------------------------- signature effects (timed by transcript lines)
+
+FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind")
+
+
+def fx_window(item: dict, words: list[list], total: float) -> tuple[float, float]:
+    """Where an effect plays in the edited video (main part), from its lines: code, never the AI."""
+    if item.get("all"):
+        return 0.0, total
+    if item.get("at") == "start":
+        return 0.0, min(total, float(item.get("seconds", 1.5)))
+    if item.get("at") == "end":
+        return max(0.0, total - float(item.get("seconds", 1.5))), total
+    rng = item.get("lines")
+    if isinstance(rng, int):
+        rng = [rng, rng]
+    if not isinstance(rng, (list, tuple)) or len(rng) != 2:
+        raise Problem(f"Effect '{item.get('type')}' needs \"lines\": [first, last] (or \"all\": true, \"at\": \"start\"/\"end\").")
+    win = line_window(words, int(rng[0]), int(rng[1]))
+    if win is None:
+        raise Problem(f"Effect '{item.get('type')}': lines {rng[0]}-{rng[1]} aren't in this video.")
+    a, b = win
+    if item.get("type") == "flash":
+        b = a + float(item.get("seconds", 0.15))
+    elif item.get("seconds"):
+        b = min(b, a + float(item["seconds"]))
+    return max(0.0, a - 0.05), min(total, b + 0.05)
+
+
+def fx_chain(kind: str, w: int, h: int, item: dict) -> str:
+    """The ffmpeg filters for one effect (applied only inside its window)."""
+    u = max(2, round(min(w, h) / 160))
+    strength = float(item.get("strength", 1.0))
+    if kind == "shake":
+        amp = 0.04 * strength
+        return f"crop=iw*{1 - amp * 2:.3f}:ih*{1 - amp * 2:.3f}:x='(iw-ow)/2+(iw-ow)/2*sin(t*41)*0.9':y='(ih-oh)/2+(ih-oh)/2*cos(t*33)*0.9',scale={w}:{h}"
+    if kind == "flash":
+        return f"eq=brightness={0.45 * strength:.2f}:contrast=0.75"
+    if kind == "rgb":
+        return f"rgbashift=rh=-{round(3 * u * strength)}:bh={round(3 * u * strength)}"
+    if kind == "glitch":
+        return f"rgbashift=rh=-{round(5 * u * strength)}:bv={round(3 * u * strength)},noise=alls={round(35 * strength)}:allf=t,crop=iw:ih*0.985:0:'ih*0.015*mod(floor(t*24),2)',scale={w}:{h}"
+    if kind == "blur":
+        return f"boxblur={round(6 * u * strength)}:2"
+    if kind == "bw":
+        return "hue=s=0,eq=contrast=1.12"
+    if kind == "vhs":
+        return f"curves=preset=vintage,eq=saturation=1.25:contrast=1.08,rgbashift=rh=-{u}:bh={u},noise=alls={round(16 * strength)}:allf=t,drawgrid=w=0:h={max(3, u * 2)}:t=1:c=black@0.22"
+    if kind == "grain":
+        return f"noise=alls={round(12 * strength)}:allf=t"
+    raise Problem(f"Unknown effect '{kind}'. Use: {', '.join(FX_TYPES)}.")
+
+
+def fx_graph(label: str, cfg: dict, words: list[list], total: float, w: int, h: int, fps: float) -> tuple[list[str], str]:
+    """Each effect runs on a copy of the picture, shown only inside its window (overlay with enable)."""
+    graph = []
+    for k, item in enumerate(cfg.get("fx") or []):
+        kind = item.get("type")
+        if kind == "behind":
+            continue  # needs the person cut out: done after the main render
+        a, b = fx_window(item, words, total)
+        if kind == "light_leak":
+            colours = item.get("colours") or ["0xFF8A00", "0xFF2D55"]
+            graph.append(f"gradients=s={w}x{h}:c0={colours[0]}:c1={colours[1]}:x0=0:y0=0:x1={w}:y1={h}:speed=0.03:d={total:.3f}:r={fps:g},format=rgba,colorchannelmixer=aa={0.38 * float(item.get('strength', 1.0)):.2f}[lk{k}]")
+            graph.append(f"[{label}][lk{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':shortest=1[fx{k}]")
+        else:
+            graph.append(f"[{label}]split[fxa{k}][fxb{k}]")
+            graph.append(f"[fxb{k}]{fx_chain(kind, w, h, item)},setsar=1,format=yuv420p[fxc{k}]")
+            graph.append(f"[fxa{k}][fxc{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})'[fx{k}]")
+        label = f"fx{k}"
+    return graph, label
+
+
+def beats_of(path: Path, limit: float | None = None) -> list[float]:
+    """Beat times in a music file: loud onsets at least 0.25 s apart (ffmpeg decodes; plain Python finds the peaks)."""
+    import array
+
+    proc = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(path), *(["-t", f"{limit:.2f}"] if limit else []), "-ac", "1", "-ar", "11025", "-f", "s16le", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    samples = array.array("h")
+    samples.frombytes(proc.stdout[: len(proc.stdout) // 2 * 2])
+    hop = 256
+    energy = [sum(abs(x) for x in samples[i:i + hop]) / hop for i in range(0, len(samples) - hop, hop)]
+    beats, last = [], -1.0
+    for i in range(8, len(energy)):
+        local = sum(energy[i - 8:i]) / 8 + 1
+        t = i * hop / 11025
+        if energy[i] > local * 1.6 and energy[i] > 400 and t - last >= 0.25:
+            beats.append(round(t, 3))
+            last = t
+    return beats
+
+
+def beat_pulse(label: str, beats: list[float], w: int, h: int, fps: float, amount: float = 0.04) -> tuple[list[str], str]:
+    """A small zoom bump on every beat (zoompan on the finished frame size)."""
+    if not beats:
+        return [], label
+    beats = beats[:150]
+    bump = "+".join(f"gte(it,{b:.3f})*exp(-(it-{b:.3f})*14)" for b in beats)
+    return [f"[{label}]zoompan=z='1+{amount:.3f}*min(1,{bump})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={w}x{h}:fps={fps:g},setsar=1[bp]"], "bp"
+
+
+def split_graph(label: str, cfg: dict, w: int, h: int, fps: float, total: float, add_input, resolve) -> tuple[list[str], str]:
+    """Split screen: the edit on one part, another clip (gameplay, a demo, B-roll) on the other."""
+    sp = cfg["split"] if isinstance(cfg["split"], dict) else {"clip": cfg["split"]}
+    clip = resolve(sp.get("clip") or "")
+    if not clip.exists():
+        raise Problem(f"Split screen: can't find {clip}.")
+    share = min(0.6, max(0.25, float(sp.get("share", 0.45))))
+    h_clip = even(h * share)
+    h_main = h - h_clip
+    info = probe(clip)
+    if clip.suffix.lower() in IMAGE_EXT:
+        ci = add_input("-loop", "1", "-framerate", f"{fps:g}", "-t", f"{total:.3f}", "-i", str(clip))
+    else:
+        ci = add_input("-stream_loop", "-1", "-ss", f"{float(sp.get('start', 0)):.3f}", "-t", f"{total:.3f}", "-i", str(clip))
+    graph = shape(label, "spm", w, h, w, h_main, 0.5, fps)
+    graph += shape(f"{ci}:v", "spc", info["width"], info["height"], w, h_clip, float(sp.get("focus_x", 0.5)), fps)
+    order = "[spc][spm]" if sp.get("position") == "top" else "[spm][spc]"
+    graph.append(f"{order}vstack=inputs=2,setsar=1[spv]")
+    return graph, "spv"
+
+
+def behind_windows(cfg: dict, words: list[list], total: float) -> list[tuple[float, float, dict]]:
+    return [(*fx_window(item, words, total), item) for item in cfg.get("fx") or [] if item.get("type") == "behind"]
+
+
+def behind_ass(path: Path, w: int, h: int, items: list[tuple[float, float, dict]], brand: dict, offset: float) -> None:
+    look = brand_look(brand)
+    family = look["font"] if look.get("font_path") else "Arial"
+    size = round(min(w, h) * 0.3)
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {w}", f"PlayResY: {h}", "WrapStyle: 2", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Behind,{family},{size},{ass_colour(look['primary'])},{ass_colour(look['primary'])},{ass_colour('#000000', 0.7)},{ass_colour('#000000', 1)},-1,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1",
+        "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for a, b, item in items:
+        colour = ass_colour(item.get("color") or look["primary"])
+        y = round(h * float(item.get("y", 0.38)))
+        text = ass_text(str(item.get("text", "")).upper())
+        lines.append(f"Dialogue: 0,{ass_time(a + offset)},{ass_time(b + offset)},Behind,,0,0,0,,{{\\pos({w // 2},{y})\\c{colour}\\fscx60\\fscy60\\t(0,220,\\fscx100\\fscy100)}}{text}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def cut_out_person(segment: Path, out: Path) -> None:
+    """The person in a short clip, with a see-through background (HyperFrames' local model)."""
+    proc = subprocess.run([*hyperframes_cmd(), "remove-background", str(segment), "-o", str(out), "--quality", "balanced"], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not out.exists():
+        raise Problem("Couldn't cut the person out for the words-behind effect:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-5:]))
+
+
+def apply_behind(out: Path, items: list[tuple[float, float, dict]], brand: dict, w: int, h: int, final: bool, folder: Path, stem: str, offset: float) -> None:
+    """Big words behind the person: the words are drawn on the video, then the cut-out person goes back on top."""
+    work = folder / f"{stem}_behind"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    base = out.with_name(out.stem + "_prebehind" + out.suffix)
+    out.replace(base)
+    try:
+        people = []
+        for k, (a, b, _item) in enumerate(items):
+            seg = work / f"seg{k}.mp4"
+            run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{a + offset:.3f}", "-t", f"{b - a:.3f}", "-i", str(base), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", str(seg)])
+            person = work / f"person{k}.webm"
+            cut_out_person(seg, person)
+            people.append((a + offset, b + offset, person))
+        ass = work / "behind.ass"
+        behind_ass(ass, w, h, items, brand, offset)
+        look = brand_look(brand)
+        fonts = work / "fonts"
+        fonts.mkdir()
+        if look.get("font_path"):
+            shutil.copy2(look["font_path"], fonts / Path(look["font_path"]).name)
+        inputs, chain, label = ["-i", str(base)], [f"[0:v]ass={ass.name}:fontsdir=fonts[bt]"], "bt"
+        for k, (a, b, person) in enumerate(people):
+            inputs += ["-c:v", "libvpx-vp9", "-itsoffset", f"{a:.3f}", "-i", str(person)]
+            chain.append(f"[{label}][{k + 1}:v]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[bh{k}]")
+            label = f"bh{k}"
+        quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", "-map", "0:a?", "-c:a", "copy", *quality, "-movflags", "+faststart", str(out)], cwd=work)
+        base.unlink(missing_ok=True)
+        if final:
+            shutil.rmtree(work, ignore_errors=True)
+    except BaseException:
+        if not out.exists() and base.exists():
+            base.replace(out)
+        raise
+
+
+def catalog_items(query: str | None = None) -> list[dict]:
+    args = [*hyperframes_cmd(), "catalog", "--json"] + ([query] if query else [])
+    proc = subprocess.run(args, env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+    try:
+        return json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise Problem("HyperFrames' catalog didn't answer. Check the internet connection and try again.") from exc
+
+
+def cmd_catalog(args) -> None:
+    items = catalog_items(" ".join(args.words) if args.words else None)
+    if args.type:
+        items = [x for x in items if x.get("type") == args.type]
+    shown = items[: args.limit]
+    say(f"HyperFrames catalog: {len(items)} match{'es' if len(items) != 1 else ''}" + (f", first {len(shown)}" if len(items) > len(shown) else "") + ":")
+    for x in shown:
+        dims = x.get("dimensions") or {}
+        size = f" {dims.get('width')}x{dims.get('height')}" if dims else ""
+        say(f"  {x['name']} [{x['type']}{size}{', ' + str(round(x['duration'], 1)) + 's' if x.get('duration') else ''}] {x.get('description', '')[:110]}")
+    say("Blocks go in a plan as {\"type\": \"block\", \"name\": \"<name>\", \"lines\": [a, b]}; components: `davnai.py catalog-get <name>`, then adapt it into a custom graphic (reference/motion.md).")
+
+
+def cmd_catalog_get(args) -> None:
+    target = MOTION_DIR / "catalog"
+    target.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run([*hyperframes_cmd(), "add", args.name, "--dir", str(target), "--json", "--no-clipboard", *(["--force"] if args.force else [])], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    try:
+        info = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise Problem(f"Couldn't get '{args.name}' from the catalog:\n{(proc.stderr or proc.stdout).strip()[-400:]}") from exc
+    if not info.get("ok"):
+        raise Problem(f"Couldn't get '{args.name}': {info}")
+    say(f"Got {args.name} ({info.get('type', '').replace('hyperframes:', '')}):", *(f"  {p}" for p in info.get("written", [])),
+        "Copy it next to the plan, replace the sample names, logos and colours with the person's (never show another company's branding), "
+        "then use it as {\"type\": \"block\", \"html\": \"<your copy>\", \"lines\": [a, b]} (a block) or adapt it into a custom graphic (a component).")
+
+
 # ---------------------------------------------------------------- storyboard
 
 
@@ -1602,6 +1890,11 @@ def scene_list(cfg: dict, plan: dict, plan_dir: Path) -> tuple[list[dict], float
             rng = [rng, rng] if isinstance(rng, int) else rng
             if inside(rng):
                 notes.append(f"{m.get('type')}: {m.get('text') or m.get('name') or m.get('title') or ''}".rstrip(": "))
+        for fx in cfg.get("fx") or []:
+            rng = fx.get("lines")
+            rng = [rng, rng] if isinstance(rng, int) else rng
+            if inside(rng):
+                notes.append(f"{fx.get('type')}" + (f" \"{fx['text']}\"" if fx.get("text") else ""))
         for s in cfg.get("sfx") or []:
             if s.get("line") is not None and first <= int(s["line"]) <= last:
                 notes.append(f"sound: {Path(str(s.get('file', ''))).name}")
@@ -1927,6 +2220,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--speed", type=float, default=1.0)
     p.set_defaults(fn=cmd_voice)
     sub.add_parser("themes", help="the built-in themes").set_defaults(fn=cmd_themes)
+    p = sub.add_parser("catalog", help="search HyperFrames' catalog of ready-made pieces (needs setup --motion)")
+    p.add_argument("words", nargs="*")
+    p.add_argument("--type", choices=["block", "component"])
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(fn=cmd_catalog)
+    p = sub.add_parser("catalog-get", help="download one catalog piece to adapt")
+    p.add_argument("name")
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(fn=cmd_catalog_get)
     p = sub.add_parser("qc", help="quality checks on a video (black or frozen picture, loudness, captions over faces)")
     p.add_argument("file")
     p.add_argument("--captions", action="store_true", help="also check captions against faces")

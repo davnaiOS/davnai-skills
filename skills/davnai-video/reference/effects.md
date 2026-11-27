@@ -35,3 +35,29 @@ Animated graphics (titles, lower thirds, counters, lists, charts, end screens) a
 - **Faceless:** captions (bounce or type), scenes every 2 to 5 s, transition slide or dissolve, music, look.
 - **Calm or premium:** captions fade, look soft or cinematic, transition dissolve, no sound effects.
 - **Long YouTube edit:** tighten, logo, intro and outro, a few texts, zooms on key moments only.
+
+## Signature effects (timed by lines)
+
+Add `"fx": [ ... ]` to an output. Each effect has a `type` and `"lines": [first, last]` (or `"all": true`, `"at": "start"`/`"end"` with `"seconds"`), plus optional `"strength"` (default 1).
+
+| type | what it does |
+|---|---|
+| `behind` | **Big words behind the person**: `{ "type": "behind", "text": "MONEY", "lines": [12, 13] }`. The person is cut out (on this computer, with HyperFrames; needs `setup --motion`) and put back in front of the words. Captions pause during it. Optional `"y"` (0 to 1, height of the words, default 0.38), `"color"`. Best on a clear shot of one person. |
+| `shake` | camera shake for impact |
+| `flash` | a quick bright flash (0.15 s) on a punchline or a cut |
+| `rgb` | colour-split (chromatic) look |
+| `glitch` | glitchy colour split, noise and jitter |
+| `blur` | soft blur (a dreamy or "focus" moment) |
+| `bw` | black and white for a moment (a flashback, a "before") |
+| `vhs` | old tape look: faded colour, scan lines, noise |
+| `grain` | film grain (use `"all": true` for the whole video) |
+| `light_leak` | warm light washing across; `"colours": ["0xFF8A00", "0xFF2D55"]` to change |
+
+## Split screen
+
+`"split": { "clip": "clips/gameplay.mp4", "position": "bottom", "share": 0.4 }`: the edit on one part, another clip on the other (gameplay, a demo, B-roll, a reaction). `position` top or bottom, `share` 0.25 to 0.6 of the height. Captions move to the middle line unless you set `caption_position`.
+
+## Music beats
+
+- `"beat_pulse": true` (with `"music"`): a small zoom bump on every beat (`"beat_amount": 0.04`).
+- `"beat_cuts": true` (faceless videos with `"music"`): scene changes move onto the nearest beat (within 0.3 s).

@@ -245,3 +245,45 @@ def test_quality_checks_find_black_and_quiet_video(tmp_path):
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=3", "-f", "lavfi", "-i", "sine=frequency=300:d=3", "-filter:a", "volume=0.05", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(bad)], check=True)
     notes = davnai.quality_checks(bad, {}, {})
     assert any(n.startswith("⚠ black picture") for n in notes) and any("⚠ loudness" in n for n in notes)
+
+
+def test_effect_windows_and_filters():
+    words = [["a", 1.0, 1.4, 1], ["b", 1.5, 2.0, 1], ["c", 3.0, 3.5, 2]]
+    assert davnai.fx_window({"type": "shake", "lines": [1, 1]}, words, 10) == pytest.approx((0.95, 2.05))
+    assert davnai.fx_window({"type": "flash", "lines": 2}, words, 10) == pytest.approx((2.95, 3.2))
+    assert davnai.fx_window({"type": "grain", "all": True}, words, 10) == (0.0, 10)
+    with pytest.raises(davnai.Problem):
+        davnai.fx_window({"type": "shake", "lines": [5, 6]}, words, 10)
+    for kind in ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain"):
+        assert davnai.fx_chain(kind, 540, 960, {})
+    with pytest.raises(davnai.Problem):
+        davnai.fx_chain("nope", 540, 960, {})
+    graph, label = davnai.fx_graph("v", {"fx": [{"type": "rgb", "lines": [1, 1]}, {"type": "behind", "text": "x", "lines": [2, 2]}]}, words, 10, 540, 960, 30)
+    assert label == "fx0" and any("enable='between(t,0.950,2.050)'" in g for g in graph)
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_beats_are_found_in_music(tmp_path):
+    music = tmp_path / "beat.wav"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "aevalsrc='0.6*sin(2*PI*60*t)*exp(-mod(t,0.5)*12)':d=6", str(music)], check=True)
+    beats = davnai.beats_of(music)
+    assert 9 <= len(beats) <= 13
+    assert all(0.4 <= b - a <= 0.6 for a, b in zip(beats, beats[1:]))
+    graph, label = davnai.beat_pulse("v", beats, 540, 960, 30)
+    assert label == "bp" and "zoompan" in graph[0]
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_words_behind_put_the_person_back_on_top(tmp_path, monkeypatch):
+    monkeypatch.setattr(davnai, "BRAND_DIR", tmp_path / "brand")
+    out = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=180x320:d=3:r=30", "-f", "lavfi", "-i", "sine=d=3", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)], check=True)
+
+    def fake_cutout(seg, person):  # a red "person" in the middle; see-through elsewhere
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(seg), "-vf", "format=rgba,geq=r=255:g=0:b=0:a='if(between(X,W*0.4,W*0.6),255,0)'", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", str(person)], check=True)
+
+    monkeypatch.setattr(davnai, "cut_out_person", fake_cutout)
+    davnai.apply_behind(out, [(0.5, 2.5, {"text": "MONEY"})], {}, 180, 320, True, tmp_path, "v", 0.0)
+    frame = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", "1.5", "-i", str(out), "-frames:v", "1", "-vf", "crop=4:4:88:150", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    assert frame[0] > 200 and frame[2] < 60  # the person (red) is in front of the words
+    assert davnai.probe(out)["audio"]

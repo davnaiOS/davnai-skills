@@ -16,6 +16,7 @@ Add `"motion": [ ... ]` to an output. Each graphic has a `type` and either `"lin
 | `quote` | `text`, `author` | Full-screen quote card in the brand colour. |
 | `chapter` | `number`, `text`, `seconds` (default 2.2) | Full-screen chapter card that wipes in and out. |
 | `end_screen` | `text`, `handle`, `button` | Logo, text, handle and a pulsing button (`"at": "end"`). |
+| `block` | `name` (catalog) or `html` (your copy), `vars`, `fit` | A whole catalog scene (see below). |
 | `custom` | `html`: a file you write | Anything else (see below). |
 
 ```json
@@ -45,5 +46,13 @@ registerDavnai(function (tl, root, start, duration, BRAND) {
 ```
 
 Then: `{ "type": "custom", "html": "motion/burst.html", "lines": [12, 12] }`.
+
+## Catalog scenes (`block`)
+
+HyperFrames' catalog has 448 ready-made pieces (transitions, caption styles, lower thirds, effects, charts, 3D, phone screens, follow buttons...). `python davnai.py catalog <words>` searches it (`--type block` for whole scenes).
+
+- A whole scene goes straight in: `{ "type": "block", "name": "tiktok-follow", "at": "end", "seconds": 3 }`. It's fitted to the video (`"fit": "cover"` to fill it) and can take `"vars"` if the scene declares variables.
+- Catalog scenes come with sample names, pictures and logos. Before using one, run `python davnai.py catalog-get <name>`, copy the file next to the plan, replace the samples with the person's own (handle, photo, brand colours) and use `{ "type": "block", "html": "motion/tiktok-follow.html", ... }`. Never show another company's name or logo as if it were the person's, and don't make a video look like an official post from an app.
+- Components (single effects) come the same way: adapt one into a `custom` graphic below.
 
 HyperFrames also has a large catalog of ready-made pieces (captions, transitions, lower thirds, charts, 3D, backgrounds): `node ~/.davnai/motion/node_modules/hyperframes/bin/hyperframes.mjs catalog <words>` to search, `add <name>` to get one; adapt it into a `custom` fragment with the person's brand colours.
