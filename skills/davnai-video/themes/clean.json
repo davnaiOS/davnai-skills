@@ -29,5 +29,26 @@
   "sounds": {
     "transition": "swoosh",
     "motion": "pop"
-  }
+  },
+  "frame": "none",
+  "grain": 0,
+  "emphasis_fx": "none",
+  "other_transitions": [
+    "dissolve",
+    "slide",
+    "zoom"
+  ],
+  "title_styles": [
+    "pop",
+    "slide",
+    "words"
+  ],
+  "catalog": [
+    "caption-highlight",
+    "caption-pill-karaoke",
+    "badge-pop",
+    "card-resize",
+    "count-up",
+    "cta-close"
+  ]
 }

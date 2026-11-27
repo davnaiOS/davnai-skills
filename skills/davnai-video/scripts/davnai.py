@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -443,6 +443,9 @@ THEMES = {
         "caption": {"size": 0.072, "upper": False, "color": "#FFFFFF", "accent": "#FACC15", "outline": 0.05, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 4, "anim": "pop", "place": "bottom"},
         "defaults": {"transition": "dissolve", "look": "soft"},
         "title_style": "pop", "sounds": {"transition": "swoosh", "motion": "pop"},
+        "frame": "none", "grain": 0, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["dissolve", "slide", "zoom"], "title_styles": ["pop", "slide", "words"],
+        "catalog": ["caption-highlight", "caption-pill-karaoke", "badge-pop", "card-resize", "count-up", "cta-close"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "bold": {
         "colours": ["#111111", "#FFE14D"],  # used when the person has no brand colours
@@ -451,6 +454,9 @@ THEMES = {
         "caption": {"size": 0.095, "upper": True, "color": "#FFFFFF", "accent": "#FFE14D", "outline": 0.12, "outlineColor": "#000000", "shadow": False, "box": None, "karaoke": "word", "words": 2, "anim": "bounce", "keyScale": 1.15, "place": "middle"},
         "defaults": {"transition": "flash", "look": "punchy", "auto_zoom": True, "progress_bar": True},
         "title_style": "words", "sounds": {"transition": "whoosh", "motion": "impact"},
+        "frame": "none", "grain": 0, "emphasis_fx": "shake",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["flash", "whip", "zoom", "glitch"], "title_styles": ["words", "bounce", "pop"],
+        "catalog": ["caption-kinetic-slam", "char-slam-explode", "camera-shake", "kinetic-center-build", "shutter-slam", "beat-accent"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "editorial": {
         "colours": ["#1C1917", "#F5D0A9"],  # used when the person has no brand colours
@@ -459,6 +465,9 @@ THEMES = {
         "caption": {"size": 0.056, "upper": False, "color": "#FFFFFF", "accent": "#F5D0A9", "outline": 0.0, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 6, "anim": "type", "place": "top"},
         "defaults": {"transition": "fade", "look": "cinematic"},
         "title_style": "glow", "sounds": {"transition": "swoosh", "motion": "click"},
+        "frame": "letterbox", "grain": 0.5, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["fade", "dissolve", "blur"], "title_styles": ["glow", "typewriter", "slide"],
+        "catalog": ["caption-editorial-emphasis", "caption-weight-shift", "grain-overlay", "curtain-reveal", "focus-blur-resolve", "morph-text"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "neon": {
         "colours": ["#0B0B1A", "#22D3EE"],  # used when the person has no brand colours
@@ -467,6 +476,9 @@ THEMES = {
         "caption": {"size": 0.068, "upper": True, "color": "#FFFFFF", "accent": "#22D3EE", "outline": 0.05, "outlineColor": "#22D3EE", "shadow": False, "box": None, "karaoke": "word", "words": 3, "anim": "fade", "glow": True, "place": "bottom"},
         "defaults": {"transition": "glitch", "look": "cool"},
         "title_style": "glow", "sounds": {"transition": "glitch", "motion": "ding"},
+        "frame": "scanlines", "grain": 0, "emphasis_fx": "rgb",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["glitch", "flash", "blur"], "title_styles": ["glow", "typewriter", "words"],
+        "catalog": ["caption-neon-glow", "caption-neon-accent", "rgb-glitch-text", "chromatic-aberration-wipe", "aurora-drift"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "minimal": {
         "colours": ["#18181B", "#3F3F46"],  # used when the person has no brand colours
@@ -475,6 +487,9 @@ THEMES = {
         "caption": {"size": 0.05, "upper": False, "color": "#FFFFFF", "accent": "#FFFFFF", "outline": 0.03, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "none", "words": 7, "anim": "fade", "place": "top"},
         "defaults": {},
         "title_style": "slide", "sounds": {},
+        "frame": "none", "grain": 0, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["fade", "dissolve"], "title_styles": ["slide", "glow"],
+        "catalog": ["caption-clip-wipe", "fade-through", "drift-hold", "blur-in"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "playful": {
         "colours": ["#FF5DA2", "#1B1B3A"],  # used when the person has no brand colours
@@ -483,6 +498,9 @@ THEMES = {
         "caption": {"size": 0.075, "upper": False, "color": "#FFFFFF", "accent": "#FF5DA2", "outline": 0.1, "outlineColor": "#1B1B3A", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "bounce", "keyScale": 1.2, "place": "bottom"},
         "defaults": {"transition": "slide_up", "look": "vivid"},
         "title_style": "bounce", "sounds": {"transition": "swoosh", "motion": "pop"},
+        "frame": "none", "grain": 0, "emphasis_fx": "flash",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["slide_up", "circle", "zoom", "whip"], "title_styles": ["bounce", "pop", "words"],
+        "catalog": ["caption-emoji-pop", "confetti", "badge-pop", "gesture-tap", "paper-collage-reveal"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "news": {
         "colours": ["#B91C1C", "#111111"],  # used when the person has no brand colours
@@ -491,6 +509,9 @@ THEMES = {
         "caption": {"size": 0.06, "upper": False, "color": "#FFFFFF", "accent": "#FFFFFF", "outline": 0.0, "outlineColor": "#000000", "shadow": False, "box": {"color": "#111111", "alpha": 0.85}, "karaoke": "none", "words": 5, "anim": "fade", "place": "bottom"},
         "defaults": {"transition": "wipe"},
         "title_style": "slide", "sounds": {"transition": "swoosh", "motion": "click"},
+        "frame": "none", "grain": 0, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["wipe", "slide", "flash"], "title_styles": ["slide", "words"],
+        "catalog": ["ticker-takeover", "caption-clip-wipe", "directional-wipe", "count-up", "chart-story"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "tech": {
         "colours": ["#0B0F14", "#34D399"],  # used when the person has no brand colours
@@ -499,6 +520,9 @@ THEMES = {
         "caption": {"size": 0.055, "upper": False, "color": "#E5E7EB", "accent": "#34D399", "outline": 0.0, "outlineColor": "#000000", "shadow": False, "box": {"color": "#0B0F14", "alpha": 0.8}, "karaoke": "word", "words": 5, "anim": "type", "place": "bottom"},
         "defaults": {"transition": "glitch", "look": "cool"},
         "title_style": "typewriter", "sounds": {"transition": "glitch", "motion": "click"},
+        "frame": "none", "grain": 0.3, "emphasis_fx": "glitch",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["glitch", "wipe", "slide"], "title_styles": ["typewriter", "words", "glow"],
+        "catalog": ["code-terminal-run", "terminal-simulator", "caption-matrix-decode", "agent-cursor", "cursor-annotate", "ascii-trail-reveal"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "retro": {
         "colours": ["#C2410C", "#3B1F0E"],  # used when the person has no brand colours
@@ -507,6 +531,9 @@ THEMES = {
         "caption": {"size": 0.068, "upper": True, "color": "#FFF4D6", "accent": "#FF8A3D", "outline": 0.08, "outlineColor": "#3B1F0E", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "place": "bottom"},
         "defaults": {"transition": "dissolve", "look": "retro"},
         "title_style": "bounce", "sounds": {"transition": "whoosh", "motion": "pop"},
+        "frame": "scanlines", "grain": 1.0, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["dissolve", "circle", "wipe"], "title_styles": ["bounce", "pop", "typewriter"],
+        "catalog": ["grain-overlay", "stop-motion-cadence", "torn-paper-rip", "colorama-wipe", "caption-texture"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "luxury": {
         "colours": ["#0C0A08", "#E6C67A"],  # used when the person has no brand colours
@@ -515,6 +542,9 @@ THEMES = {
         "caption": {"size": 0.058, "upper": False, "color": "#FFFFFF", "accent": "#E6C67A", "outline": 0.0, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 5, "anim": "fade", "place": "bottom"},
         "defaults": {"transition": "dissolve", "look": "soft"},
         "title_style": "glow", "sounds": {"transition": "swoosh", "motion": "ding"},
+        "frame": "border", "grain": 0.3, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["dissolve", "fade", "blur"], "title_styles": ["glow", "slide"],
+        "catalog": ["caption-weight-shift", "gloss-sweep", "curtain-reveal", "focus-rack", "logo-brand-close"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "handwritten": {
         "colours": ["#FDE047", "#111111"],  # used when the person has no brand colours
@@ -523,6 +553,9 @@ THEMES = {
         "caption": {"size": 0.07, "upper": False, "color": "#FFFFFF", "accent": "#FDE047", "outline": 0.08, "outlineColor": "#111111", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "place": "bottom"},
         "defaults": {"transition": "whip"},
         "title_style": "words", "sounds": {"transition": "swoosh", "motion": "pop"},
+        "frame": "none", "grain": 0.4, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["whip", "slide", "dissolve"], "title_styles": ["words", "bounce", "pop"],
+        "catalog": ["hw-underline", "hw-arrow", "hw-callout-circle", "hw-box-label", "marker-checklist-card", "ink-bleed-reveal"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
     "podcast": {
         "colours": ["#1E3A8A", "#0F172A"],  # used when the person has no brand colours
@@ -531,6 +564,9 @@ THEMES = {
         "caption": {"size": 0.075, "upper": False, "color": "#FFFFFF", "accent": "#60A5FA", "outline": 0.08, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "keyScale": 1.15, "place": "middle"},
         "defaults": {"fill": "blur", "clean_audio": True},
         "title_style": "pop", "sounds": {"transition": "swoosh", "motion": "pop"},
+        "frame": "none", "grain": 0, "emphasis_fx": "none",  # the theme kit: applied unless "theme_extras": false
+        "other_transitions": ["dissolve", "flash"], "title_styles": ["pop", "words"],
+        "catalog": ["caption-pill-karaoke", "caption-highlight", "count-up", "conic-progress-ring", "chat-message"],  # HyperFrames pieces that suit it (davnai.py catalog-get <name>)
     },
 }
 
@@ -573,8 +609,8 @@ def load_theme_files() -> list[str]:
 
 
 SOUND_RECIPES = {  # made by ffmpeg on the person's computer: no sound files to licence
-    "whoosh": "anoisesrc=color=pink:d=0.55:a=0.7,highpass=f=300,lowpass=f=4500,afade=t=in:d=0.3,afade=t=out:st=0.3:d=0.25",
-    "swoosh": "anoisesrc=color=pink:d=0.4:a=0.4,highpass=f=900,lowpass=f=6000,afade=t=in:d=0.2,afade=t=out:st=0.2:d=0.2",
+    "whoosh": "anoisesrc=color=pink:d=0.55:a=0.7:seed=7,highpass=f=300,lowpass=f=4500,afade=t=in:d=0.3,afade=t=out:st=0.3:d=0.25",
+    "swoosh": "anoisesrc=color=pink:d=0.4:a=0.4:seed=11,highpass=f=900,lowpass=f=6000,afade=t=in:d=0.2,afade=t=out:st=0.2:d=0.2",
     "pop": "aevalsrc='0.8*sin(2*PI*(380+900*exp(-t*28))*t)*exp(-t*16)':d=0.28",
     "click": "aevalsrc='0.7*sin(2*PI*2400*t)*exp(-t*90)':d=0.08",
     "ding": "aevalsrc='0.5*(sin(2*PI*1320*t)+0.4*sin(2*PI*2640*t))*exp(-t*4)':d=1.2",
@@ -657,6 +693,7 @@ def themed(cfg: dict, brand: dict, theme: dict | None) -> tuple[dict, dict]:
     caps["font_path"] = str(cap_font) if cap_font else None
     title_font = fonts.get(theme["title_font"])
     brand["theme"] = {"name": theme["name"], "title_style": theme["title_style"], "sounds": theme["sounds"],
+                      "frame": theme.get("frame", "none"), "grain": theme.get("grain", 0), "emphasis_fx": theme.get("emphasis_fx", "none"),
                       "title_family": FONT_SOURCES[theme["title_font"]][0] if title_font else None, "title_path": str(title_font) if title_font else None}
     if cfg.get("theme_colours") or not [c for c in brand.get("colours") or [] if c.get("hex")]:
         brand["colours"] = [{"name": "theme", "hex": hx} for hx in theme.get("colours", [])]  # no brand colours: the theme's own
@@ -1196,6 +1233,16 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             raise Problem(f"Unknown look '{cfg['look']}'. Use: {', '.join(LOOKS)}.")
         graph.append(f"[{label}]{LOOKS[cfg['look']]}[vlook]")
         label = "vlook"
+    extras = theme if cfg.get("theme_extras", True) else {}
+    if extras:  # the theme kit: grain over the whole video, an effect on each emphasised word
+        fx = list(cfg.get("fx") or [])
+        if extras.get("grain") and not any(f.get("type") == "grain" for f in fx):
+            fx.append({"type": "grain", "all": True, "strength": float(extras["grain"])})
+        if extras.get("emphasis_fx") not in (None, "none") and cfg.get("emphasis"):
+            wanted = {e.lower() for e in cfg["emphasis"]}
+            hit = sorted({int(wd[3]) for wd in words if re.sub(r"[^\w']", "", wd[0]).lower() in wanted})[:8]
+            fx += [{"type": extras["emphasis_fx"], "lines": [n, n], "seconds": 0.35, "strength": 0.8} for n in hit]
+        cfg = {**cfg, "fx": fx}
     part, label = fx_graph(label, cfg, words, main_len, w, h, fps)
     graph += part
     if cfg.get("beat_pulse") and cfg.get("music"):
@@ -1235,6 +1282,18 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             spot = {"top-left": f"{round(w * 0.05)}:{round(h * 0.1)}", "top-right": f"W-w-{round(w * 0.05)}:{round(h * 0.1)}", "middle": "(W-w)/2:(H-h)/2", "bottom-left": f"{round(w * 0.05)}:H-h-{round(h * 0.38 if h > w else h * 0.1)}"}.get(item.get("position", "top-right"), f"W-w-{round(w * 0.05)}:{round(h * 0.1)}")
             graph.append(f"[{label}][b{k}]overlay={spot}:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[vb{k}]")
         label = f"vb{k}"
+    frame = (extras or {}).get("frame", "none")
+    if frame != "none":  # the theme's frame, under the captions
+        edge = max(2, round(min(w, h) * 0.004))
+        accent = "0x" + ((brand.get("captions") or {}).get("look", {}).get("accent") or "#FFFFFF").lstrip("#")
+        frame_filter = {
+            "letterbox": f"drawbox=x=0:y=0:w=iw:h=ih*0.07:color=black:t=fill,drawbox=x=0:y=ih*0.93:w=iw:h=ih*0.07:color=black:t=fill",
+            "border": f"drawbox=x=iw*0.035:y=ih*0.025:w=iw*0.93:h=ih*0.95:color={accent}@0.85:t={edge}",
+            "scanlines": f"drawgrid=w=0:h={max(3, edge * 2)}:t=1:c=black@0.16",
+        }.get(frame)
+        if frame_filter:
+            graph.append(f"[{label}]{frame_filter}[vframe]")
+            label = "vframe"
     ass = folder / f"{name}_v{version}.ass"
     if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, _ in behind]):
         fonts = folder / "fonts"

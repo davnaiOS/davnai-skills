@@ -32,5 +32,24 @@
     "transition": "swoosh",
     "motion": "click"
   },
+  "frame": "none",
+  "grain": 0,
+  "emphasis_fx": "none",
+  "other_transitions": [
+    "wipe",
+    "slide",
+    "flash"
+  ],
+  "title_styles": [
+    "slide",
+    "words"
+  ],
+  "catalog": [
+    "ticker-takeover",
+    "caption-clip-wipe",
+    "directional-wipe",
+    "count-up",
+    "chart-story"
+  ],
   "css": ".box{{border-radius:0;box-shadow:none;border-left:{s}px solid {a};text-transform:uppercase}}.panel{{border-radius:0;border-left:{s}px solid {p}}}.lt-name{{text-transform:uppercase}}"
 }

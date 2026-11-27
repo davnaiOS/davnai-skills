@@ -33,5 +33,26 @@
     "transition": "glitch",
     "motion": "click"
   },
+  "frame": "none",
+  "grain": 0.3,
+  "emphasis_fx": "glitch",
+  "other_transitions": [
+    "glitch",
+    "wipe",
+    "slide"
+  ],
+  "title_styles": [
+    "typewriter",
+    "words",
+    "glow"
+  ],
+  "catalog": [
+    "code-terminal-run",
+    "terminal-simulator",
+    "caption-matrix-decode",
+    "agent-cursor",
+    "cursor-annotate",
+    "ascii-trail-reveal"
+  ],
   "css": ".box{{border-radius:{h}px;background:#0B0F14;border:{h}px solid {a};color:{a};box-shadow:none}}.panel{{background:#0B0F14;border-left:{h}px solid {a}}}"
 }

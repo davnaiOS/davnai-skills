@@ -66,7 +66,25 @@ def build() -> dict[str, str]:
     for name, t in davnai.THEMES.items():
         fonts = f"{davnai.FONT_SOURCES[t['caption_font']][0]} / {davnai.FONT_SOURCES[t['title_font']][0]}"
         defaults = ", ".join(f"{k} {v}" for k, v in t["defaults"].items()) or "none"
-        index.append(f"| [{name}](../skills/davnai-video/themes/{name}.json) | {t['about']} | {fonts} | {defaults} |")
+        index.append(f"| [{name}](themes/{name}.md) | {t['about']} | {fonts} | {defaults} |")
+
+    for name, t in davnai.BUILT_IN_THEMES.items():
+        cap = t["caption"]
+        files[f"themes/{name}.md"] = page(
+            f"Theme: {name}", t["about"],
+            "| | |\n|---|---|\n"
+            f"| Fonts | captions {davnai.FONT_SOURCES[t['caption_font']][0]}, titles {davnai.FONT_SOURCES[t['title_font']][0]} |\n"
+            f"| Captions | {cap['words']} words, {cap['place']}, {cap['anim']} animation{', uppercase' if cap.get('upper') else ''}{', glow' if cap.get('glow') else ''}{', in a box' if cap.get('box') else ''} |\n"
+            f"| Titles | {', '.join(t.get('title_styles') or [t['title_style']])} |\n"
+            f"| Transitions | {t['defaults'].get('transition', 'cut')} (also {', '.join(t.get('other_transitions') or [])}) |\n"
+            f"| Colour | {t['defaults'].get('look', 'natural')}{', film grain' if t.get('grain') else ''} |\n"
+            f"| Frame | {t.get('frame', 'none')} |\n"
+            f"| On emphasised words | {t.get('emphasis_fx', 'none')} |\n"
+            f"| Sounds | {', '.join(f'{k}: {v}' for k, v in t['sounds'].items()) or 'none'} |\n"
+            f"| Own colours (no Brand Kit) | {' and '.join(t['colours'])} |\n"
+            f"| Catalog pieces that suit it | {', '.join(t.get('catalog') or [])} |",
+            f'```json\n"theme": "{name}"\n```',
+            f"The file: [themes/{name}.json](../../skills/davnai-video/themes/{name}.json). Copy it to `~/.davnai/themes/` to make your own. `\"theme_extras\": false` turns off the frame, grain and emphasis effects.")
 
     index += ["", f"## Signature effects ({len(EFFECTS)})", "", "| effect | what it does | plan |", "|---|---|---|"]
     for key, (title, what, when, plan) in EFFECTS.items():
@@ -100,7 +118,23 @@ def build() -> dict[str, str]:
     return files
 
 
+def theme_files() -> dict[str, str]:
+    """The themes as files, from the script's built-in copy (so the one-file download and the files never differ)."""
+    import json
+
+    out = {}
+    for name, t in davnai.BUILT_IN_THEMES.items():
+        data = {"name": name, **t}
+        if name in davnai.BUILT_IN_CSS:
+            data["css"] = davnai.BUILT_IN_CSS[name]
+        out[name] = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return out
+
+
 def write() -> None:
+    folder = ROOT / "skills" / "davnai-video" / "themes"
+    for name, text in theme_files().items():
+        (folder / f"{name}.json").write_text(text, encoding="utf-8")
     for rel, text in build().items():
         path = LIB / rel
         path.parent.mkdir(parents=True, exist_ok=True)

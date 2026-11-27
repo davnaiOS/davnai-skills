@@ -30,5 +30,24 @@
     "transition": "swoosh",
     "motion": "ding"
   },
+  "frame": "border",
+  "grain": 0.3,
+  "emphasis_fx": "none",
+  "other_transitions": [
+    "dissolve",
+    "fade",
+    "blur"
+  ],
+  "title_styles": [
+    "glow",
+    "slide"
+  ],
+  "catalog": [
+    "caption-weight-shift",
+    "gloss-sweep",
+    "curtain-reveal",
+    "focus-rack",
+    "logo-brand-close"
+  ],
   "css": ".box{{background:transparent;box-shadow:none;padding:0 0 {s}px;border-radius:0;border-bottom:1px solid {a};color:#fff;font-weight:400;letter-spacing:.04em}}.panel{{background:rgba(0,0,0,.45);border-left:1px solid {a}}}.full{{background:#0c0a08}}"
 }

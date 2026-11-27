@@ -19,6 +19,11 @@ def test_library_pages_are_up_to_date():
         assert (ROOT / "library" / "sounds" / f"{name}.wav").exists()
 
 
+def test_theme_files_are_written_from_the_script():
+    for name, text in build_library.theme_files().items():
+        assert (ROOT / "skills" / "davnai-video" / "themes" / f"{name}.json").read_text(encoding="utf-8") == text, "run python tools/build_library.py"
+
+
 def test_theme_files_match_the_built_in_themes():
     """The script carries its own copy so the one-file download still has every theme."""
     files = sorted((ROOT / "skills" / "davnai-video" / "themes").glob("*.json"))

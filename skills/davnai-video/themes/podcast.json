@@ -30,5 +30,23 @@
   "sounds": {
     "transition": "swoosh",
     "motion": "pop"
-  }
+  },
+  "frame": "none",
+  "grain": 0,
+  "emphasis_fx": "none",
+  "other_transitions": [
+    "dissolve",
+    "flash"
+  ],
+  "title_styles": [
+    "pop",
+    "words"
+  ],
+  "catalog": [
+    "caption-pill-karaoke",
+    "caption-highlight",
+    "count-up",
+    "conic-progress-ring",
+    "chat-message"
+  ]
 }

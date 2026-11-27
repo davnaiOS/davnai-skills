@@ -31,5 +31,25 @@
     "transition": "glitch",
     "motion": "ding"
   },
+  "frame": "scanlines",
+  "grain": 0,
+  "emphasis_fx": "rgb",
+  "other_transitions": [
+    "glitch",
+    "flash",
+    "blur"
+  ],
+  "title_styles": [
+    "glow",
+    "typewriter",
+    "words"
+  ],
+  "catalog": [
+    "caption-neon-glow",
+    "caption-neon-accent",
+    "rgb-glitch-text",
+    "chromatic-aberration-wipe",
+    "aurora-drift"
+  ],
   "css": ".box{{background:rgba(5,5,20,.55);border:{h}px solid {a};box-shadow:0 0 {g}px {a},inset 0 0 {s}px {a};text-shadow:0 0 {s}px {a}}}.panel{{border:{h}px solid {a};box-shadow:0 0 {g}px {a};background:rgba(5,5,20,.7)}}.full{{background:#05050f}}"
 }

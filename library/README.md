@@ -6,18 +6,18 @@ Everything the Davnai skill can put in a video. Each page says what it does, whe
 
 | theme | feels | fonts | defaults |
 |---|---|---|---|
-| [clean](../skills/davnai-video/themes/clean.json) | Friendly and modern: rounded brand-colour boxes, soft shadows, gentle pops. | Poppins / Poppins ExtraBold | transition dissolve, look soft |
-| [bold](../skills/davnai-video/themes/bold.json) | Loud and punchy: big uppercase words, hard shadows, flashes and zooms. For hooks and fast talkers. | Anton / Anton | transition flash, look punchy, auto_zoom True, progress_bar True |
-| [editorial](../skills/davnai-video/themes/editorial.json) | Calm and premium: serif titles, one quiet line of captions at the top, film-like colour. | Poppins Medium / DM Serif Display | transition fade, look cinematic |
-| [neon](../skills/davnai-video/themes/neon.json) | Night-time and techy: glowing outlines, dark panels, glitch cuts. | Audiowide / Audiowide | transition glitch, look cool |
-| [minimal](../skills/davnai-video/themes/minimal.json) | Quiet and simple: small captions at the top, plain cuts, no boxes. | Poppins Medium / Poppins | none |
-| [playful](../skills/davnai-video/themes/playful.json) | Bright and bouncy: rounded tilted stickers, big friendly letters, pops. For lifestyle, kids' and food content. | Righteous / Bungee | transition slide_up, look vivid |
-| [news](../skills/davnai-video/themes/news.json) | Newsroom: solid bars, uppercase headlines, straight wipes. For updates, explainers and commentary. | Archivo Black / Bebas Neue | transition wipe |
-| [tech](../skills/davnai-video/themes/tech.json) | Developer and product: monospace type, typed-in captions, dark panels with a code feel. | Space Mono / Space Mono | transition glitch, look cool |
-| [retro](../skills/davnai-video/themes/retro.json) | Retro: chunky letters, offset shadows, warm faded colour and film grain. | Bungee / Bungee | transition dissolve, look retro |
-| [luxury](../skills/davnai-video/themes/luxury.json) | Luxury: elegant display serif, thin gold lines, slow dissolves. For fashion, property and beauty. | Poppins Medium / Abril Fatface | transition dissolve, look soft |
-| [handwritten](../skills/davnai-video/themes/handwritten.json) | Creator notebook: marker handwriting, tilted notes, casual pops. | Permanent Marker / Permanent Marker | transition whip |
-| [podcast](../skills/davnai-video/themes/podcast.json) | Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out. | Poppins ExtraBold / Poppins ExtraBold | fill blur, clean_audio True |
+| [clean](themes/clean.md) | Friendly and modern: rounded brand-colour boxes, soft shadows, gentle pops. | Poppins / Poppins ExtraBold | transition dissolve, look soft |
+| [bold](themes/bold.md) | Loud and punchy: big uppercase words, hard shadows, flashes and zooms. For hooks and fast talkers. | Anton / Anton | transition flash, look punchy, auto_zoom True, progress_bar True |
+| [editorial](themes/editorial.md) | Calm and premium: serif titles, one quiet line of captions at the top, film-like colour. | Poppins Medium / DM Serif Display | transition fade, look cinematic |
+| [neon](themes/neon.md) | Night-time and techy: glowing outlines, dark panels, glitch cuts. | Audiowide / Audiowide | transition glitch, look cool |
+| [minimal](themes/minimal.md) | Quiet and simple: small captions at the top, plain cuts, no boxes. | Poppins Medium / Poppins | none |
+| [playful](themes/playful.md) | Bright and bouncy: rounded tilted stickers, big friendly letters, pops. For lifestyle, kids' and food content. | Righteous / Bungee | transition slide_up, look vivid |
+| [news](themes/news.md) | Newsroom: solid bars, uppercase headlines, straight wipes. For updates, explainers and commentary. | Archivo Black / Bebas Neue | transition wipe |
+| [tech](themes/tech.md) | Developer and product: monospace type, typed-in captions, dark panels with a code feel. | Space Mono / Space Mono | transition glitch, look cool |
+| [retro](themes/retro.md) | Retro: chunky letters, offset shadows, warm faded colour and film grain. | Bungee / Bungee | transition dissolve, look retro |
+| [luxury](themes/luxury.md) | Luxury: elegant display serif, thin gold lines, slow dissolves. For fashion, property and beauty. | Poppins Medium / Abril Fatface | transition dissolve, look soft |
+| [handwritten](themes/handwritten.md) | Creator notebook: marker handwriting, tilted notes, casual pops. | Permanent Marker / Permanent Marker | transition whip |
+| [podcast](themes/podcast.md) | Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out. | Poppins ExtraBold / Poppins ExtraBold | fill blur, clean_audio True |
 
 ## Signature effects (10)
 

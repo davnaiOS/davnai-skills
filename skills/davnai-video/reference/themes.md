@@ -18,6 +18,7 @@ A theme is a complete look in one word: caption font, size, colours and animatio
 | `podcast` | whole wide shot on a blurred background, big centred captions, cleaner voice | podcast and interview clips |
 
 - **The Brand Kit recolours every theme:** graphics use their brand colours, and captions use their caption accent. `"theme_colours": true` keeps the theme's own colours. With no brand colours yet, each theme uses its own matching pair (bold black and yellow, luxury black and gold, news red and black...).
+- **Each theme is a kit**, not just fonts: its own frame (film bars on editorial, a thin border on luxury, scan lines on retro and neon), film grain where it suits, an effect on every emphasised word (shake on bold, colour split on neon, glitch on tech, flash on playful), other transitions and title styles that fit, and HyperFrames catalog pieces picked for it. Each theme's page in `library/themes/` lists its kit. `"theme_extras": false` turns off the frame, grain and emphasis effects.
 - **The plan wins:** anything set in the output (a transition, a look, `caption_position`, `"sounds": false`) replaces the theme's choice.
 - **Your own theme:** start from one and change parts:
 

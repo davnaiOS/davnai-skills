@@ -33,5 +33,27 @@
     "transition": "whoosh",
     "motion": "impact"
   },
+  "frame": "none",
+  "grain": 0,
+  "emphasis_fx": "shake",
+  "other_transitions": [
+    "flash",
+    "whip",
+    "zoom",
+    "glitch"
+  ],
+  "title_styles": [
+    "words",
+    "bounce",
+    "pop"
+  ],
+  "catalog": [
+    "caption-kinetic-slam",
+    "char-slam-explode",
+    "camera-shake",
+    "kinetic-center-build",
+    "shutter-slam",
+    "beat-accent"
+  ],
   "css": ".box{{border-radius:0;box-shadow:{s}px {s}px 0 #000;text-transform:uppercase}}.title{{font-size:{t}px}}.lt-name,.lt-role{{text-transform:uppercase}}"
 }

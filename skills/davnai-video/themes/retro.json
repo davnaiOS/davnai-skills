@@ -30,5 +30,25 @@
     "transition": "whoosh",
     "motion": "pop"
   },
+  "frame": "scanlines",
+  "grain": 1.0,
+  "emphasis_fx": "none",
+  "other_transitions": [
+    "dissolve",
+    "circle",
+    "wipe"
+  ],
+  "title_styles": [
+    "bounce",
+    "pop",
+    "typewriter"
+  ],
+  "catalog": [
+    "grain-overlay",
+    "stop-motion-cadence",
+    "torn-paper-rip",
+    "colorama-wipe",
+    "caption-texture"
+  ],
   "css": ".box{{border-radius:{h}px;border:{h}px solid #3B1F0E;box-shadow:{s}px {s}px 0 {a}}}.panel{{border:{h}px solid #3B1F0E;box-shadow:{s}px {s}px 0 {a}}}"
 }
