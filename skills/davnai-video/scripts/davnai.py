@@ -27,6 +27,8 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -39,7 +41,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.9.0"
+VERSION = "2.0.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -193,6 +195,8 @@ def cmd_check(_args) -> None:
         lines.append("✓ motion graphics (HyperFrames)")
     else:
         lines.append("· optional: motion graphics need Node.js 22+ and HyperFrames: python davnai.py setup --motion")
+    studio = studio_problem()
+    lines.append(f"✓ studio effects ({len(studio_effects())}) and cut-out" if studio is None else f"· optional: {studio}")
     lines.append("✓ Brand Kit saved" if (BRAND_DIR / "brand.json").exists() else "· Brand Kit not saved yet: call get_brand_files in Davnai, then run: davnai.py brand \"<brand_url>\"")
     lines.append("Ready." if ok else "Ask the person, then run: python davnai.py setup --yes (add --motion for motion graphics). Then check again.")
     say(*lines)
@@ -435,6 +439,20 @@ FONT_SOURCES = {  # free Google Fonts (Open Font License), downloaded by setup o
     "PermanentMarker-Regular.ttf": ("Permanent Marker", "apache/permanentmarker/PermanentMarker-Regular.ttf"),
     "AbrilFatface-Regular.ttf": ("Abril Fatface", "ofl/abrilfatface/AbrilFatface-Regular.ttf"),
     "Righteous-Regular.ttf": ("Righteous", "ofl/righteous/Righteous-Regular.ttf"),
+    # used by the studio effects engine
+    "InstrumentSerif-Italic.ttf": ("Instrument Serif", "ofl/instrumentserif/InstrumentSerif-Italic.ttf"),
+    "Inter.ttf": ("Inter", "ofl/inter/Inter%5Bopsz,wght%5D.ttf"),
+    "Montserrat.ttf": ("Montserrat", "ofl/montserrat/Montserrat%5Bwght%5D.ttf"),
+    "PlayfairDisplay.ttf": ("Playfair Display", "ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf"),
+    "PlayfairDisplay-Italic.ttf": ("Playfair Display", "ofl/playfairdisplay/PlayfairDisplay-Italic%5Bwght%5D.ttf"),
+}
+ENGINE = Path(__file__).resolve().parent.parent / "engine" / "fx.py"  # the studio effects (not in the one-file download)
+MODELS_DIR = BRAND_DIR.parent / "models"
+MODEL_FILES = {  # downloaded by setup from their makers, checked by fingerprint
+    "yunet.onnx": ("https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+                   "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"),
+    "selfie_segmenter.tflite": ("https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+                                "191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b"),
 }
 THEMES = {
     "clean": {
@@ -1279,6 +1297,9 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             graph.append(f"[{ci}:v]format=rgba,colorchannelmixer=aa={alpha:.2f}[cy{k}]")
             graph.append(f"[{label}][cy{k}]overlay=0:0:enable='between(t,{a:.3f},{b:.3f})':eof_action=pass[vcy{k}]")
             label = f"vcy{k}"
+    studio = [(*fx_window(it, words, main_len), it) for it in cfg.get("fx") or [] if it.get("type") == "studio"]
+    if studio and studio_problem():
+        raise Problem(studio_problem())
     compares = [(*fx_window(it, words, main_len), it) for it in cfg.get("fx") or [] if it.get("type") == "compare"]
     if compares:  # before / after: the cut picture, before looks and effects, on the left half
         part, label = compare_graph(label, raw_label, compares, w, h)
@@ -1337,7 +1358,7 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         if place != preferred:
             cfg = {**cfg, "caption_position": place}
     ass = folder / f"{name}_v{version}.ass"
-    if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, it in behind if it.get("type") in ("behind", "poster")]):
+    if write_ass(ass, w, h, cfg, brand, words, main_len, [(a, b) for a, b, it in behind if it.get("type") in ("behind", "poster")] + [(a, b) for a, b, _ in studio]):
         fonts = folder / "fonts"
         fonts.mkdir(exist_ok=True)
         graph.append(f"[{label}]ass={ass.name}:fontsdir=fonts[vcap]")
@@ -1438,6 +1459,8 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
     (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
     if behind:
         apply_behind(out, behind, brand, w, h, final, folder, f"{name}_v{version}", intro_len, face_out)
+    if studio:
+        apply_studio(out, studio, brand, w, h, final, folder, f"{name}_v{version}", intro_len, resolve)
     if cfg.get("motion"):
         apply_motion(out, cfg, brand, timing, w, h, fps, final, folder, f"{name}_v{version}", plan_dir)
     checks = quality_checks(out, cfg, brand) if (final or main_len <= 180) and cfg.get("checks", True) else []
@@ -2130,9 +2153,129 @@ def relight_layers(k: int, item: dict, label: str, person: str, a: float, b: flo
     return g, f"r{k}o"
 
 
+# ---------------------------------------------------------------- studio effects (the engine in ../engine)
+
+
+def studio_effects() -> dict[str, str]:
+    """The studio effects and what each does, read from the engine (no imports needed)."""
+    if not ENGINE.exists():
+        return {}
+    text = ENGINE.read_text(encoding="utf-8")
+    return dict(re.findall(r"@effect\('([a-z0-9-]+)', '([^']*)'\)", text))
+
+
+def studio_problem() -> str | None:
+    """Why the studio effects can't run here, or None when they can."""
+    if not ENGINE.exists():
+        return "The studio effects need the Davnai skill installed (github.com/davnaiOS/davnai-skills), not just davnai.py."
+    missing = [m for m in ("numpy", "cv2", "PIL", "mediapipe") if importlib.util.find_spec(m) is None]
+    if missing:
+        return f"The studio effects need {', '.join(missing)}: run python davnai.py setup --yes."
+    if not all((MODELS_DIR / n).exists() for n in MODEL_FILES):
+        return "The studio effects need the face and cut-out models: run python davnai.py setup --yes."
+    return None
+
+
+def ensure_models() -> list[str]:
+    """Downloads the face finder and cut-out models once; returns the ones that are ready."""
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    ready = []
+    for name, (url, digest) in MODEL_FILES.items():
+        path = MODELS_DIR / name
+        if not path.exists():
+            code, _, data = http(url, timeout=120)
+            if code == 200 and hashlib.sha256(data).hexdigest() == digest:
+                path.write_bytes(data)
+        if path.exists():
+            ready.append(name)
+    return ready
+
+
+def studio_plan(items: list[tuple[float, float, dict]], s0: float, offset: float, resolve, work: Path) -> list[dict]:
+    """The engine's plan for one stretch of video: times from the transcript lines, options as given (pure but for pictures)."""
+    known = studio_effects()
+    plan = []
+    for k, (a, b, item) in enumerate(items):
+        name = {"apple-toggles": "settings-toggles"}.get(str(item.get("effect") or "").lower(), str(item.get("effect") or "").lower())
+        if known and name not in known:
+            raise Problem(f"Unknown studio effect '{name}'. See reference/studio.md (or library/studio.md) for the {len(known)} effects.")
+        step = {key: val for key, val in item.items() if key not in ("type", "effect", "lines", "at", "seconds", "all") and not key.startswith("_")}
+        if isinstance(step.get("images"), list):  # the engine takes a folder of pictures or clips
+            folder = work / f"pics{k}"
+            folder.mkdir(parents=True, exist_ok=True)
+            for i, pic in enumerate(step["images"]):
+                src = resolve(str(pic))
+                if not src.exists():
+                    raise Problem(f"Studio effect '{name}': can't find {src}.")
+                shutil.copy2(src, folder / f"{i:03d}{src.suffix.lower()}")
+            step["images"] = str(folder)
+        elif step.get("images"):
+            step["images"] = str(resolve(str(step["images"])))
+        for key in ("text", "lines_text", "right", "others"):
+            if isinstance(step.get(key), list):
+                step[key] = "|".join(str(x) for x in step[key])
+        if "lines_text" in step:  # the engine's own "lines" option (cover lines); ours are transcript lines
+            step["lines"] = step.pop("lines_text")
+        start = round(a + offset - s0, 3)
+        if "at_seconds" in step:  # seconds into the effect; tap wants the time in the clip
+            step["at"] = round(start + float(step.pop("at_seconds")), 3) if name == "tap" else step.pop("at_seconds")
+        if "ticks_seconds" in step:
+            ticks = step.pop("ticks_seconds")
+            ticks = ticks if isinstance(ticks, list) else str(ticks).split("|")
+            step["ticks"] = "|".join(f"{(start if name == 'todo' else 0) + float(t):.2f}" for t in ticks)  # todo wants clip times
+        plan.append({"fx": name, "start": start, "end": round(b + offset - s0, 3), **step})
+    return plan
+
+
+def apply_studio(out: Path, items: list[tuple[float, float, dict]], brand: dict, w: int, h: int, final: bool, folder: Path, stem: str, offset: float, resolve) -> None:
+    """Studio effects run only on the stretches that have them (the engine draws every frame, so it's kept short)."""
+    problem = studio_problem()
+    if problem:
+        raise Problem(problem)
+    work = folder / f"{stem}_studio"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    base = out.with_name(out.stem + "_prestudio" + out.suffix)
+    out.replace(base)
+    total = probe(base)["seconds"]
+    look = brand_look(brand)
+    env = {**os.environ, "DAVNAI_HOME": str(BRAND_DIR.parent), "DAVNAI_FONTS": str(FONTS_DIR), "DAVNAI_MODELS": str(MODELS_DIR),
+           "DAVNAI_BRAND": json.dumps({"name": brand.get("name") or "", "handle": look.get("handle") or "", "primary": look["primary"], "accent": look["accent"]})}
+    try:
+        ensure_fonts(FONT_SOURCES)
+        segments = []
+        for g, (a, b, ks) in enumerate(merge_windows([(a + offset, b + offset, k) for k, (a, b, _) in enumerate(items)])):
+            s0, s1 = max(0.0, a - 0.6), min(total, b + 0.6)
+            seg, done = work / f"seg{g}.mp4", work / f"seg{g}_fx.mp4"
+            run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{s0:.3f}", "-t", f"{s1 - s0:.3f}", "-i", str(base), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", str(seg)])
+            plan = studio_plan([items[k] for k in ks], s0, offset, resolve, work)
+            (work / f"seg{g}.json").write_text(json.dumps({"effects": plan}, indent=1), encoding="utf-8")
+            say(f"Studio effects at {a:.1f}s ({', '.join(p['fx'] for p in plan)}): this takes a little while...")
+            proc = subprocess.run([sys.executable, str(ENGINE), "--plan", str(work / f"seg{g}.json"), str(seg), str(done), "--width", str(min(w, h))],
+                                  env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+            if proc.returncode != 0 or not done.exists():
+                raise Problem(f"The studio effect at {a:.1f}s didn't render:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-6:]))
+            segments.append((s0, s1, done))
+        inputs, chain, label = ["-i", str(base)], [], "0:v"
+        for g, (s0, s1, done) in enumerate(segments):
+            inputs += ["-itsoffset", f"{s0:.3f}", "-i", str(done)]
+            chain.append(f"[{g + 1}:v]scale={w}:{h},setsar=1[sf{g}]")
+            chain.append(f"[{label}][sf{g}]overlay=0:0:enable='between(t,{s0:.3f},{s1 - 0.04:.3f})':eof_action=pass[so{g}]")
+            label = f"so{g}"
+        quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", "-map", "0:a?", "-c:a", "copy", *quality, "-movflags", "+faststart", str(out)])
+        base.unlink(missing_ok=True)
+        if final:
+            shutil.rmtree(work, ignore_errors=True)
+    except BaseException:
+        if not out.exists() and base.exists():
+            base.replace(out)
+        raise
+
+
 # ---------------------------------------------------------------- signature effects (timed by transcript lines)
 
-FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight", "poster", "compare", "cycle", "custom")
+FX_TYPES = ("shake", "flash", "rgb", "glitch", "blur", "bw", "vhs", "grain", "light_leak", "behind", "relight", "poster", "compare", "cycle", "custom", "studio")
 BLOCKED_FILTERS = ("movie", "amovie", "sendcmd", "asendcmd", "zmq", "azmq")  # custom effects may not read files or take commands
 
 
@@ -2228,7 +2371,7 @@ def fx_graph(label: str, cfg: dict, words: list[list], total: float, w: int, h: 
     graph = []
     for k, item in enumerate(cfg.get("fx") or []):
         kind = item.get("type")
-        if needs_cutout(item) or kind in ("compare", "cycle"):
+        if needs_cutout(item) or kind in ("compare", "cycle", "studio"):
             continue  # cut-out effects come after the main render; before/after is laid on later
         a, b = fx_window(item, words, total)
         if kind == "light_leak":
@@ -2416,7 +2559,13 @@ def poster_background(path: Path, w: int, h: int, colour: str) -> None:
 
 
 def cut_out_person(segment: Path, out: Path) -> None:
-    """The person in a short clip, with a see-through background (HyperFrames' local model)."""
+    """The person in a short clip, with a see-through background: the studio engine's cut-out (MediaPipe) when it's set up,
+    else HyperFrames' model."""
+    if studio_problem() is None:
+        env = {**os.environ, "DAVNAI_HOME": str(BRAND_DIR.parent), "DAVNAI_MODELS": str(MODELS_DIR)}
+        proc = subprocess.run([sys.executable, str(ENGINE), "--cutout", str(segment), str(out)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        if proc.returncode == 0 and out.exists():
+            return
     proc = subprocess.run([*hyperframes_cmd(), "remove-background", str(segment), "-o", str(out), "--quality", "balanced"], env={**os.environ, **NO_TRACKING}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0 or not out.exists():
         raise Problem("Couldn't cut the person out for the words-behind effect:\n" + "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-5:]))
@@ -2960,8 +3109,8 @@ def ask(question: str, yes: bool) -> bool:
 
 def cmd_setup(args) -> None:
     lines, restart = [], False
-    pip = [sys.executable, "-m", "pip", "install", "--user", "--quiet", "faster-whisper", "fonttools", "brotli", "opencv-python-headless"]
-    say("Installing the Python parts (speech-to-text, brand fonts, face check)...")
+    pip = [sys.executable, "-m", "pip", "install", "--user", "--quiet", "faster-whisper", "fonttools", "brotli", "opencv-python-headless", "numpy", "pillow", "mediapipe"]
+    say("Installing the Python parts (speech-to-text, brand fonts, face tracking and cut-out)...")
     proc = subprocess.run(pip, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0 and "externally-managed" in (proc.stderr or ""):
         proc = subprocess.run([*pip, "--break-system-packages"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
@@ -2985,6 +3134,10 @@ def cmd_setup(args) -> None:
         fonts = ensure_fonts(FONT_SOURCES)
         made = [n for n in SOUND_RECIPES if sound_file(n)]
         lines.append(f"✓ theme fonts ({len(fonts)}/{len(FONT_SOURCES)}) and built-in sounds ({len(made)})")
+    models = ensure_models()
+    lines.append(f"✓ face and cut-out models ({len(models)}/{len(MODEL_FILES)})" if len(models) == len(MODEL_FILES) else "✗ face and cut-out models didn't download; run setup again")
+    if importlib.util.find_spec("mediapipe") is None:
+        lines.append("· studio effects: MediaPipe didn't install for this Python (it supports Python 3.9 to 3.13). Install Python 3.12 and run setup with it.")
     if args.motion:
         npm = shutil.which("npm")
         if node_major() >= 22 and npm:

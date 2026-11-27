@@ -495,3 +495,46 @@ def test_carousel_copies_its_pictures(tmp_path):
     project.mkdir()
     html, _ = davnai.motion_item(2, {"type": "carousel", "images": ["0.jpg", "1.jpg", "2.jpg"]}, 0.0, 3.0, 540, 960, davnai.brand_look({}), tmp_path, project)
     assert html.count("car-card") == 3 and (project / "m2_0.jpg").exists()
+
+
+def test_studio_effects_are_listed_and_branded():
+    effects = davnai.studio_effects()
+    assert len(effects) >= 51 and "orbit" in effects and "settings-toggles" in effects
+    text = davnai.ENGINE.read_text(encoding="utf-8").lower()
+    assert "vibha" not in text and "claude" not in text.replace("claude-video-effects", "")
+
+
+def test_studio_plan_uses_lines_not_times(tmp_path):
+    for i in range(2):
+        (tmp_path / f"{i}.png").write_bytes(b"x")
+    resolve = lambda p: (tmp_path / p)  # noqa: E731
+    items = [(2.0, 4.0, {"type": "studio", "effect": "orbit", "images": ["0.png", "1.png"], "lines": [3, 4]}),
+             (5.0, 7.0, {"type": "studio", "effect": "cover-star", "text": "UP", "lines_text": ["a", "b"], "lines": [5, 5]}),
+             (5.5, 7.0, {"type": "studio", "effect": "tap", "at_seconds": 1.0, "lines": [5, 5]}),
+             (6.0, 7.0, {"type": "studio", "effect": "todo", "ticks_seconds": [0.5, 1], "lines": [6, 6]})]
+    plan = davnai.studio_plan(items, 1.5, 0.0, resolve, tmp_path)
+    assert plan[0]["fx"] == "orbit" and plan[0]["start"] == 0.5 and plan[0]["end"] == 2.5 and len(list(Path(plan[0]["images"]).iterdir())) == 2
+    assert plan[1]["lines"] == "a|b" and "lines_text" not in plan[1]
+    assert plan[2]["at"] == 5.0 and plan[3]["ticks"] == "5.00|5.50"
+    with pytest.raises(davnai.Problem):
+        davnai.studio_plan([(0, 1, {"type": "studio", "effect": "nope"})], 0, 0, resolve, tmp_path)
+
+
+def test_studio_needs_its_parts(monkeypatch, tmp_path):
+    monkeypatch.setattr(davnai, "MODELS_DIR", tmp_path / "none")
+    assert davnai.studio_problem()
+    monkeypatch.setattr(davnai, "ENGINE", tmp_path / "missing.py")
+    assert "skill installed" in davnai.studio_problem() and davnai.studio_effects() == {}
+
+
+@pytest.mark.skipif(not FFMPEG or davnai.studio_problem() is not None, reason="needs ffmpeg and the studio parts")
+def test_studio_effect_renders(tmp_path):
+    clip = tmp_path / "c.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=180x320:d=2:r=30", "-c:v", "libx264", str(clip)], check=True)
+    plan = tmp_path / "p.json"
+    plan.write_text(json.dumps({"effects": [{"fx": "backdrop-word", "start": 0.2, "end": 1.8, "text": "HI"}]}))
+    out = tmp_path / "o.mp4"
+    env = {**__import__("os").environ, "DAVNAI_MODELS": str(davnai.MODELS_DIR), "DAVNAI_FONTS": str(davnai.FONTS_DIR)}
+    proc = subprocess.run([sys.executable, str(davnai.ENGINE), "--plan", str(plan), str(clip), str(out), "--width", "180"], env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert davnai.probe(out)["width"] == 180

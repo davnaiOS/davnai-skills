@@ -18,6 +18,7 @@ EFFECTS = {
     "compare": ("Before and after", "The left half shows the picture before looks and effects, the right half the finished edit, with labels and a divider.", "Showing off the edit, tutorials, transformations.", '{ "type": "compare", "labels": ["RAW", "EDIT"], "lines": [3, 4] }'),
     "relight": ("Relight the person", "Changes the light around the speaker: spotlight, low_key, silhouette, neon, rim, under_light or golden_hour. The person is cut out so the light hits the room and the person separately (golden_hour needs no cut-out).", "Hooks, dramatic lines, a mood change, music videos.", '{ "type": "relight", "light": "neon", "lines": [4, 6] }'),
     "cycle": ("Pictures cycling behind you", "Pictures (screenshots, products, places, stock) flick past behind the person on each beat of the music (or every 0.4 s), with the person cut out in front. Add \"behind\": false to flick them over the whole frame instead.", "Lists, \"I tried 10 apps\", travel, hooks.", '{ "type": "cycle", "images": ["pics/1.jpg", "pics/2.jpg", "pics/3.jpg"], "lines": [4, 5] }'),
+    "studio": ("Studio effects (51)", "Ready-made effects that track the face and can sit behind the person: orbiting pictures, glass widgets, comment boxes, tier lists, checklists, magazine covers and more. The full list is on its own page.", "Hooks, lists, proof, reveals: see the list.", '{ "type": "studio", "effect": "orbit", "images": ["shots/1.png", "shots/2.png", "shots/3.png"], "lines": [4, 5] }'),
     "custom": ("Your own effect", "Any ffmpeg filter chain your AI writes, timed to transcript lines and checked on a blank frame first. For looks the list doesn't have yet.", "Anything: thermal camera, colour cycling, mirror, pixelate, edge glow.", '{ "type": "custom", "filter": "hue=h=90*t,eq=contrast=1.3", "lines": [8, 9] }'),
     "shake": ("Camera shake", "A short handheld shake.", "Impact moments, punchlines, surprises.", '{ "type": "shake", "lines": [8, 8] }'),
     "flash": ("Flash", "A quick bright flash (0.15 s).", "A cut on the beat, a reveal.", '{ "type": "flash", "lines": [5, 5] }'),
@@ -99,6 +100,15 @@ def build() -> dict[str, str]:
     for key, (title, what, when, plan) in EFFECTS.items():
         files[f"effects/{key}.md"] = page(title, what, f"**Use it for:** {when}", f'**In the plan** (inside `"fx": [...]`):\n\n```json\n{plan}\n```', "Optional: `\"strength\"` (default 1). Place it with `\"lines\"`, `\"all\": true` or `\"at\": \"start\"`/`\"end\"`.")
         index.append(f"| [{title}](effects/{key}.md) | {what} | `\"type\": \"{key}\"` |")
+
+    studio = davnai.studio_effects()
+    assert len(studio) >= 51, "the studio engine lists its effects"
+    index += ["", f"## Studio effects ({len(studio)})", "", "They track the face and can sit behind the person. Options for each: [reference/studio.md](../skills/davnai-video/reference/studio.md).", "", "| effect | what it does |", "|---|---|"]
+    rows = [f"| `{k}` | {v[:1].upper() + v[1:]} |" for k, v in studio.items()]
+    index += rows
+    files["studio.md"] = page(f"Studio effects ({len(studio)})", "Ready-made effects that track the face and can sit behind the person, drawn on your computer by the studio engine (set up by `python davnai.py setup`). Time them with transcript lines like any effect.",
+                              '```json\n{ "type": "studio", "effect": "glass-widgets", "text": "12", "lines": [9, 10] }\n```', "| effect | what it does |\n|---|---|\n" + "\n".join(rows),
+                              "Options for each: [reference/studio.md](../skills/davnai-video/reference/studio.md). The engine is adapted from open-source work: see [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).")
 
     index += ["", f"## Motion graphics ({len(MOTION)})", "", "In the brand's colours and fonts, made with HyperFrames (`setup --motion`).", "", "| graphic | what it does |", "|---|---|"]
     for key, (title, what, plan) in MOTION.items():
