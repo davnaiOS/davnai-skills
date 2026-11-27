@@ -1,11 +1,21 @@
 {
   "name": "davnai",
   "displayName": "Davnai",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Edit videos on your own computer with your own AI the Davnai way (Shorts, captions in your brand, effects, faceless videos), then post everywhere with Davnai.",
-  "author": { "name": "Davnai", "email": "support@davnai.com", "url": "https://davnai.com" },
+  "author": {
+    "name": "Davnai",
+    "url": "https://davnai.com"
+  },
   "homepage": "https://davnai.com",
   "repository": "https://github.com/davnaiOS/davnai-skills",
   "license": "MIT",
-  "keywords": ["video", "shorts", "captions", "ffmpeg", "social-media", "davnai"]
+  "keywords": [
+    "video",
+    "shorts",
+    "captions",
+    "ffmpeg",
+    "social-media",
+    "davnai"
+  ]
 }

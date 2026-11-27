@@ -26,7 +26,7 @@ You edit with free tools on this computer (ffmpeg and a local speech-to-text mod
 
 1. **Brand Kit:** call Davnai's `get_brand_files`, then run `python davnai.py brand "<brand_url>"`. It saves the colours, caption style, logo and their own intro and outro in `~/.davnai/brand` (redo it when the person changes their Brand Kit; the link lasts an hour).
 2. **Transcript:** `python davnai.py transcribe "<video>"` prints numbered lines like `#12 (4.1s) the three mistakes everyone makes`. A second run reuses it.
-3. **Plan:** write `plan.json` in the `.davnai` folder (format below). For Shorts, read `reference/shorts.md`; long edits `reference/long-edit.md`; faceless videos `reference/faceless.md`; captions `reference/captions.md`; effects `reference/effects.md`; motion graphics `reference/motion.md`; stock `reference/stock.md`.
+3. **Plan:** write `plan.json` in the `.davnai` folder (format below). For Shorts, read `reference/shorts.md`; long edits `reference/long-edit.md`; faceless videos `reference/faceless.md`; captions `reference/captions.md`; themes `reference/themes.md`; effects `reference/effects.md`; motion graphics `reference/motion.md`; stock `reference/stock.md`.
 4. **Storyboard:** `python davnai.py storyboard "<plan.json>"` prints each scene (lines, length, what's said, what happens on screen) and makes a picture page (`plan_storyboard.html`). Show the person the scene list and the page, and change the plan until they approve it. Skip it only for a simple cut they've already described.
 5. **Preview:** `python davnai.py render "<plan.json>"` makes a small, fast preview for each output and prints where it is. Tell the person to watch it.
 6. **Changes:** change the plan and render again; each round is a new version (v2, v3…) and earlier ones are kept. "Go back to v2": `--from-version 2`.
@@ -34,11 +34,16 @@ You edit with free tools on this computer (ffmpeg and a local speech-to-text mod
 8. **Upload:** ask "Upload this to Davnai?". Then `python davnai.py probe "<final>"`, call Davnai's `upload_from_computer` with what it printed, and run `python davnai.py upload "<final>" "<ticket>"`. It prints the video id.
 9. **Post:** write the captions yourself in their Brand Kit voice and use Davnai's `create_posts` with the video id. Posts wait for their approval in Davnai unless they've said otherwise.
 
+## Quality checks
+
+Every render ends with checks: black or frozen picture, loudness (social apps like about -14 LUFS), long silences, length for the platform, and captions covering a face (when OpenCV is installed). Fix anything marked ⚠ before showing the person, or tell them why it's fine. `python davnai.py qc "<video>" --captions` checks any video.
+
 ## Plan format
 
 ```json
 {
   "source": "talk.mp4",
+  "theme": "clean",
   "outputs": [
     { "name": "short-1", "aspect": "9:16", "keep": [[14, 19]], "captions": true, "tighten": true, "outro": true },
     { "name": "full", "aspect": "source", "keep": [[1, 40], [44, 120]], "tighten": true, "logo": true }
@@ -46,6 +51,7 @@ You edit with free tools on this computer (ffmpeg and a local speech-to-text mod
 }
 ```
 
+- `theme`: a complete look in one word (clean, bold, editorial, neon, minimal, playful, news, tech, retro, luxury, handwritten, podcast) recoloured by the Brand Kit, or your own; see `reference/themes.md`. Pick one with the person (show them the list) unless they've said what they like.
 - `keep`: transcript line ranges `[first, last]`, played in the order listed. To start or end inside a line: `{ "from": [14, 3], "to": [19, 12] }` (line 14 from its 3rd word to line 19's 12th word).
 - `aspect`: `9:16`, `1:1`, `4:5`, `16:9` or `source`. `focus_x` (0 to 1, default 0.5) moves a tall crop left or right.
 - `tighten`: shortens pauses longer than 0.6 s. `captions`: burns captions in the Brand Kit style. `logo`, `intro`, `outro`: from the Brand Kit (intro and outro only when it has their own video).

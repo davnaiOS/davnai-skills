@@ -6,7 +6,9 @@ Commands (python davnai.py <command> --help for details):
   brand <brand_url>         save the Brand Kit from Davnai (get_brand_files) in ~/.davnai/brand
   transcribe <video>        numbered transcript lines (reused on the second run)
   frame <video> --line N    one still from the middle of line N (to check framing)
+  themes                    the built-in themes (12)
   storyboard <plan.json>    the scenes to approve before rendering (and a picture page)
+  qc <video>                quality checks (also run after every render)
   render <plan.json>        previews (v1, v2, ...); --final for full quality; motion graphics via HyperFrames
   setup [--motion]          install what's missing (asks first; --yes when the person already agreed)
   voice "<text>"            a free voice-over made on this computer (faceless videos)
@@ -32,7 +34,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 UA = f"davnai-skill/{VERSION}"
 BRAND_DIR = Path(os.environ.get("DAVNAI_HOME", Path.home() / ".davnai")) / "brand"
 PAUSE = 0.6  # pauses longer than this are shortened by "tighten"
@@ -179,6 +181,8 @@ def cmd_check(_args) -> None:
         lines.append("✓ brand fonts (fonttools)")
     except ImportError:
         lines.append("· optional: pip install fonttools brotli (uses the exact Brand Kit caption font)")
+    have = sum((FONTS_DIR / n).exists() for n in FONT_SOURCES)
+    lines.append(f"✓ theme fonts ({have}/{len(FONT_SOURCES)})" if have == len(FONT_SOURCES) else f"· theme fonts {have}/{len(FONT_SOURCES)} (downloaded on first use, or by setup)")
     hf = MOTION_DIR / "node_modules" / "hyperframes" / "bin" / "hyperframes.mjs"
     if node_major() >= 22 and hf.exists():
         lines.append("✓ motion graphics (HyperFrames)")
@@ -402,6 +406,311 @@ def tighten(spans: list[tuple[float, float]], words: list[list]) -> list[tuple[f
     return [(s, e) for s, e in out if e - s > 0.05]
 
 
+# ---------------------------------------------------------------- themes, built-in sounds and quality checks
+
+FONTS_DIR = BRAND_DIR.parent / "fonts"
+SOUNDS_DIR = BRAND_DIR.parent / "sounds"
+FONT_SOURCES = {  # free Google Fonts (Open Font License), downloaded by setup or on first use
+    "Poppins-Medium.ttf": ("Poppins Medium", "ofl/poppins/Poppins-Medium.ttf"),
+    "Poppins-Bold.ttf": ("Poppins", "ofl/poppins/Poppins-Bold.ttf"),
+    "Poppins-ExtraBold.ttf": ("Poppins ExtraBold", "ofl/poppins/Poppins-ExtraBold.ttf"),
+    "Anton-Regular.ttf": ("Anton", "ofl/anton/Anton-Regular.ttf"),
+    "BebasNeue-Regular.ttf": ("Bebas Neue", "ofl/bebasneue/BebasNeue-Regular.ttf"),
+    "DMSerifDisplay-Regular.ttf": ("DM Serif Display", "ofl/dmserifdisplay/DMSerifDisplay-Regular.ttf"),
+    "DMSerifDisplay-Italic.ttf": ("DM Serif Display", "ofl/dmserifdisplay/DMSerifDisplay-Italic.ttf"),
+    "Audiowide-Regular.ttf": ("Audiowide", "ofl/audiowide/Audiowide-Regular.ttf"),
+    "Bungee-Regular.ttf": ("Bungee", "ofl/bungee/Bungee-Regular.ttf"),
+    "SpaceMono-Bold.ttf": ("Space Mono", "ofl/spacemono/SpaceMono-Bold.ttf"),
+    "ArchivoBlack-Regular.ttf": ("Archivo Black", "ofl/archivoblack/ArchivoBlack-Regular.ttf"),
+    "PermanentMarker-Regular.ttf": ("Permanent Marker", "apache/permanentmarker/PermanentMarker-Regular.ttf"),
+    "AbrilFatface-Regular.ttf": ("Abril Fatface", "ofl/abrilfatface/AbrilFatface-Regular.ttf"),
+    "Righteous-Regular.ttf": ("Righteous", "ofl/righteous/Righteous-Regular.ttf"),
+}
+THEMES = {
+    "clean": {
+        "about": "Friendly and modern: rounded brand-colour boxes, soft shadows, gentle pops.",
+        "caption_font": "Poppins-Bold.ttf", "title_font": "Poppins-ExtraBold.ttf",
+        "caption": {"size": 0.072, "upper": False, "color": "#FFFFFF", "accent": "#FACC15", "outline": 0.05, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 4, "anim": "pop", "place": "bottom"},
+        "defaults": {"transition": "dissolve", "look": "soft"},
+        "title_style": "pop", "sounds": {"transition": "swoosh", "motion": "pop"},
+    },
+    "bold": {
+        "about": "Loud and punchy: big uppercase words, hard shadows, flashes and zooms. For hooks and fast talkers.",
+        "caption_font": "Anton-Regular.ttf", "title_font": "Anton-Regular.ttf",
+        "caption": {"size": 0.095, "upper": True, "color": "#FFFFFF", "accent": "#FFE14D", "outline": 0.12, "outlineColor": "#000000", "shadow": False, "box": None, "karaoke": "word", "words": 2, "anim": "bounce", "keyScale": 1.15, "place": "middle"},
+        "defaults": {"transition": "flash", "look": "punchy", "auto_zoom": True, "progress_bar": True},
+        "title_style": "words", "sounds": {"transition": "whoosh", "motion": "impact"},
+    },
+    "editorial": {
+        "about": "Calm and premium: serif titles, one quiet line of captions at the top, film-like colour.",
+        "caption_font": "Poppins-Medium.ttf", "title_font": "DMSerifDisplay-Regular.ttf",
+        "caption": {"size": 0.056, "upper": False, "color": "#FFFFFF", "accent": "#F5D0A9", "outline": 0.0, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 6, "anim": "type", "place": "top"},
+        "defaults": {"transition": "fade", "look": "cinematic"},
+        "title_style": "glow", "sounds": {"transition": "swoosh", "motion": "click"},
+    },
+    "neon": {
+        "about": "Night-time and techy: glowing outlines, dark panels, glitch cuts.",
+        "caption_font": "Audiowide-Regular.ttf", "title_font": "Audiowide-Regular.ttf",
+        "caption": {"size": 0.068, "upper": True, "color": "#FFFFFF", "accent": "#22D3EE", "outline": 0.05, "outlineColor": "#22D3EE", "shadow": False, "box": None, "karaoke": "word", "words": 3, "anim": "fade", "glow": True, "place": "bottom"},
+        "defaults": {"transition": "glitch", "look": "cool"},
+        "title_style": "glow", "sounds": {"transition": "glitch", "motion": "ding"},
+    },
+    "minimal": {
+        "about": "Quiet and simple: small captions at the top, plain cuts, no boxes.",
+        "caption_font": "Poppins-Medium.ttf", "title_font": "Poppins-Bold.ttf",
+        "caption": {"size": 0.05, "upper": False, "color": "#FFFFFF", "accent": "#FFFFFF", "outline": 0.03, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "none", "words": 7, "anim": "fade", "place": "top"},
+        "defaults": {},
+        "title_style": "slide", "sounds": {},
+    },
+    "playful": {
+        "about": "Bright and bouncy: rounded tilted stickers, big friendly letters, pops. For lifestyle, kids' and food content.",
+        "caption_font": "Righteous-Regular.ttf", "title_font": "Bungee-Regular.ttf",
+        "caption": {"size": 0.075, "upper": False, "color": "#FFFFFF", "accent": "#FF5DA2", "outline": 0.1, "outlineColor": "#1B1B3A", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "bounce", "keyScale": 1.2, "place": "bottom"},
+        "defaults": {"transition": "slide_up", "look": "vivid"},
+        "title_style": "bounce", "sounds": {"transition": "swoosh", "motion": "pop"},
+    },
+    "news": {
+        "about": "Newsroom: solid bars, uppercase headlines, straight wipes. For updates, explainers and commentary.",
+        "caption_font": "ArchivoBlack-Regular.ttf", "title_font": "BebasNeue-Regular.ttf",
+        "caption": {"size": 0.06, "upper": False, "color": "#FFFFFF", "accent": "#FFFFFF", "outline": 0.0, "outlineColor": "#000000", "shadow": False, "box": {"color": "#111111", "alpha": 0.85}, "karaoke": "none", "words": 5, "anim": "fade", "place": "bottom"},
+        "defaults": {"transition": "wipe"},
+        "title_style": "slide", "sounds": {"transition": "swoosh", "motion": "click"},
+    },
+    "tech": {
+        "about": "Developer and product: monospace type, typed-in captions, dark panels with a code feel.",
+        "caption_font": "SpaceMono-Bold.ttf", "title_font": "SpaceMono-Bold.ttf",
+        "caption": {"size": 0.055, "upper": False, "color": "#E5E7EB", "accent": "#34D399", "outline": 0.0, "outlineColor": "#000000", "shadow": False, "box": {"color": "#0B0F14", "alpha": 0.8}, "karaoke": "word", "words": 5, "anim": "type", "place": "bottom"},
+        "defaults": {"transition": "glitch", "look": "cool"},
+        "title_style": "typewriter", "sounds": {"transition": "glitch", "motion": "click"},
+    },
+    "retro": {
+        "about": "Retro: chunky letters, offset shadows, warm faded colour and film grain.",
+        "caption_font": "Bungee-Regular.ttf", "title_font": "Bungee-Regular.ttf",
+        "caption": {"size": 0.068, "upper": True, "color": "#FFF4D6", "accent": "#FF8A3D", "outline": 0.08, "outlineColor": "#3B1F0E", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "place": "bottom"},
+        "defaults": {"transition": "dissolve", "look": "retro"},
+        "title_style": "bounce", "sounds": {"transition": "whoosh", "motion": "pop"},
+    },
+    "luxury": {
+        "about": "Luxury: elegant display serif, thin gold lines, slow dissolves. For fashion, property and beauty.",
+        "caption_font": "Poppins-Medium.ttf", "title_font": "AbrilFatface-Regular.ttf",
+        "caption": {"size": 0.058, "upper": False, "color": "#FFFFFF", "accent": "#E6C67A", "outline": 0.0, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 5, "anim": "fade", "place": "bottom"},
+        "defaults": {"transition": "dissolve", "look": "soft"},
+        "title_style": "glow", "sounds": {"transition": "swoosh", "motion": "ding"},
+    },
+    "handwritten": {
+        "about": "Creator notebook: marker handwriting, tilted notes, casual pops.",
+        "caption_font": "PermanentMarker-Regular.ttf", "title_font": "PermanentMarker-Regular.ttf",
+        "caption": {"size": 0.07, "upper": False, "color": "#FFFFFF", "accent": "#FDE047", "outline": 0.08, "outlineColor": "#111111", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "place": "bottom"},
+        "defaults": {"transition": "whip"},
+        "title_style": "words", "sounds": {"transition": "swoosh", "motion": "pop"},
+    },
+    "podcast": {
+        "about": "Podcast clips: the whole wide shot on a blurred background, big centred captions, key words stand out.",
+        "caption_font": "Poppins-ExtraBold.ttf", "title_font": "Poppins-ExtraBold.ttf",
+        "caption": {"size": 0.075, "upper": False, "color": "#FFFFFF", "accent": "#60A5FA", "outline": 0.08, "outlineColor": "#000000", "shadow": True, "box": None, "karaoke": "word", "words": 3, "anim": "pop", "keyScale": 1.15, "place": "middle"},
+        "defaults": {"fill": "blur", "clean_audio": True},
+        "title_style": "pop", "sounds": {"transition": "swoosh", "motion": "pop"},
+    },
+}
+
+# Graphic shapes per theme (motion graphics), on top of the shared style.
+THEME_CSS = {
+    "bold": ".box{{border-radius:0;box-shadow:{s}px {s}px 0 #000;text-transform:uppercase}}.title{{font-size:{t}px}}.lt-name,.lt-role{{text-transform:uppercase}}",
+    "editorial": ".box{{background:transparent;box-shadow:none;padding:0 0 {s}px;border-radius:0;border-bottom:{h}px solid {a};font-weight:400}}.panel{{background:rgba(10,10,10,.6);border-left:none;border-top:{h}px solid {a}}}.full{{background:#0d0d0d}}",
+    "neon": ".box{{background:rgba(5,5,20,.55);border:{h}px solid {a};box-shadow:0 0 {g}px {a},inset 0 0 {s}px {a};text-shadow:0 0 {s}px {a}}}.panel{{border:{h}px solid {a};box-shadow:0 0 {g}px {a};background:rgba(5,5,20,.7)}}.full{{background:#05050f}}",
+    "minimal": ".box{{background:transparent;box-shadow:none;padding:0;text-shadow:0 2px 12px rgba(0,0,0,.6)}}.title{{font-weight:500}}.panel{{background:rgba(0,0,0,.35);border-left:none}}",
+    "playful": ".box{{border-radius:{g}px;transform:rotate(-2deg);box-shadow:0 {s}px 0 rgba(0,0,0,.25)}}.panel{{border-radius:{g}px;border-left:none;transform:rotate(1deg)}}",
+    "news": ".box{{border-radius:0;box-shadow:none;border-left:{s}px solid {a};text-transform:uppercase}}.panel{{border-radius:0;border-left:{s}px solid {p}}}.lt-name{{text-transform:uppercase}}",
+    "tech": ".box{{border-radius:{h}px;background:#0B0F14;border:{h}px solid {a};color:{a};box-shadow:none}}.panel{{background:#0B0F14;border-left:{h}px solid {a}}}",
+    "retro": ".box{{border-radius:{h}px;border:{h}px solid #3B1F0E;box-shadow:{s}px {s}px 0 {a}}}.panel{{border:{h}px solid #3B1F0E;box-shadow:{s}px {s}px 0 {a}}}",
+    "luxury": ".box{{background:transparent;box-shadow:none;padding:0 0 {s}px;border-radius:0;border-bottom:1px solid {a};color:#fff;font-weight:400;letter-spacing:.04em}}.panel{{background:rgba(0,0,0,.45);border-left:1px solid {a}}}.full{{background:#0c0a08}}",
+    "handwritten": ".box{{background:#FFF8C5;color:#111;border-radius:{h}px;transform:rotate(-3deg);box-shadow:0 {s}px {g}px rgba(0,0,0,.3);font-weight:400}}.panel{{background:#FFF8C5;color:#111;transform:rotate(1.5deg);border-left:none}}",
+}
+SOUND_RECIPES = {  # made by ffmpeg on the person's computer: no sound files to licence
+    "whoosh": "anoisesrc=color=pink:d=0.55:a=0.7,highpass=f=300,lowpass=f=4500,afade=t=in:d=0.3,afade=t=out:st=0.3:d=0.25",
+    "swoosh": "anoisesrc=color=pink:d=0.4:a=0.4,highpass=f=900,lowpass=f=6000,afade=t=in:d=0.2,afade=t=out:st=0.2:d=0.2",
+    "pop": "aevalsrc='0.8*sin(2*PI*(380+900*exp(-t*28))*t)*exp(-t*16)':d=0.28",
+    "click": "aevalsrc='0.7*sin(2*PI*2400*t)*exp(-t*90)':d=0.08",
+    "ding": "aevalsrc='0.5*(sin(2*PI*1320*t)+0.4*sin(2*PI*2640*t))*exp(-t*4)':d=1.2",
+    "impact": "aevalsrc='0.9*sin(2*PI*(45+120*exp(-t*12))*t)*exp(-t*5)':d=0.9",
+    "riser": "aevalsrc='0.35*sin(2*PI*(200*t+300*t*t))*min(t/1.2,1)':d=1.4",
+    "glitch": "aevalsrc='0.45*sgn(sin(2*PI*180*t))*gt(mod(floor(t*40),3),0)*exp(-t*3)':d=0.35",
+}
+
+
+def ensure_fonts(names) -> dict[str, Path]:
+    """The theme fonts on this computer (downloads missing ones from Google Fonts once)."""
+    FONTS_DIR.mkdir(parents=True, exist_ok=True)
+    found = {}
+    for name in names:
+        path = FONTS_DIR / name
+        if not path.exists() and name in FONT_SOURCES:
+            code, _, data = http(f"https://raw.githubusercontent.com/google/fonts/main/{FONT_SOURCES[name][1]}", timeout=60)
+            if code == 200 and data[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+                path.write_bytes(data)
+        if path.exists():
+            found[name] = path
+    return found
+
+
+def sound_file(name: str) -> Path | None:
+    """A built-in sound, made once with ffmpeg."""
+    if name not in SOUND_RECIPES:
+        return None
+    path = SOUNDS_DIR / f"{name}.wav"
+    if not path.exists():
+        SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", SOUND_RECIPES[name], "-ar", "48000", "-ac", "2", str(path)])
+    return path
+
+
+def theme_of(cfg: dict, plan: dict) -> dict | None:
+    """A built-in theme by name, or your own: {"base": "bold", "caption": {...}, "defaults": {...}, ...}."""
+    pick = cfg.get("theme") or plan.get("theme")
+    if not pick:
+        return None
+    own = pick if isinstance(pick, dict) else {}
+    name = own.get("base", "clean") if own else pick
+    if name not in THEMES:
+        raise Problem(f"Unknown theme '{name}'. Use: {', '.join(THEMES)}, or your own with \"base\".")
+    theme = json.loads(json.dumps(THEMES[name]))
+    for key in ("caption", "defaults", "sounds"):
+        theme[key].update(own.get(key) or {})
+    for key in ("caption_font", "title_font", "title_style"):
+        if own.get(key):
+            if key.endswith("_font") and own[key] not in FONT_SOURCES:
+                raise Problem(f"Theme font '{own[key]}': use one of {', '.join(FONT_SOURCES)}.")
+            theme[key] = own[key]
+    return {"name": name, **theme}
+
+
+def themed(cfg: dict, brand: dict, theme: dict | None) -> tuple[dict, dict]:
+    """The output and Brand Kit with the theme applied (pure apart from fetching its fonts). The plan's own settings
+    win over the theme; the Brand Kit's colours (and caption accent) recolour it unless "theme_colours" is true."""
+    if not theme:
+        return cfg, brand
+    cfg = {**theme["defaults"], **cfg}
+    brand = json.loads(json.dumps(brand or {}))
+    fonts = ensure_fonts([theme["caption_font"], theme["title_font"]])
+    look = dict(theme["caption"])
+    own = (brand.get("captions") or {}).get("look") or {}
+    if own.get("accent") and not cfg.get("theme_colours") and theme["name"] != "minimal":
+        look["accent"] = own["accent"]
+        if theme["name"] == "neon":
+            look["outlineColor"] = own["accent"]
+    caps = brand.setdefault("captions", {})
+    caps["look"] = look
+    caps["position"] = cfg.get("caption_position") or look["place"]
+    cap_font = fonts.get(theme["caption_font"])
+    caps["font_family"] = FONT_SOURCES[theme["caption_font"]][0] if cap_font else "Arial"
+    caps["font_path"] = str(cap_font) if cap_font else None
+    title_font = fonts.get(theme["title_font"])
+    brand["theme"] = {"name": theme["name"], "title_style": theme["title_style"], "sounds": theme["sounds"],
+                      "title_family": FONT_SOURCES[theme["title_font"]][0] if title_font else None, "title_path": str(title_font) if title_font else None}
+    if cfg.get("theme_colours"):
+        brand["colours"] = []
+    return cfg, brand
+
+
+def caption_font_path(caps: dict) -> Path | None:
+    if caps.get("font_path") and Path(caps["font_path"]).exists():
+        return Path(caps["font_path"])
+    if caps.get("font_file") and (BRAND_DIR / caps["font_file"]).exists():
+        return BRAND_DIR / caps["font_file"]
+    return None
+
+
+def measure(path: Path, filters: str) -> str:
+    proc = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-vf" if not filters.startswith("a:") else "-af", filters.removeprefix("a:"), "-f", "null", "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    return proc.stderr
+
+
+def quality_checks(path: Path, cfg: dict, brand: dict) -> list[str]:
+    """Checks every render before the person sees it: black or frozen picture, loudness, length for the platform,
+    and (when OpenCV is installed) captions covering a face."""
+    info = probe(path)
+    notes = []
+    video_log = measure(path, "blackdetect=d=0.4:pix_th=0.10,freezedetect=n=0.002:d=2")
+    black = re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", video_log)
+    notes.append("⚠ black picture at " + ", ".join(f"{float(a):.1f}s" for a, _ in black[:4]) if black else "✓ no black frames")
+    frozen = re.findall(r"freeze_start: ([\d.]+)", video_log)
+    allowed = bool(cfg.get("scenes")) or any(m.get("type") in ("quote", "chapter", "end_screen") for m in cfg.get("motion") or []) or cfg.get("end_card")
+    if frozen and not allowed:
+        notes.append("⚠ the picture doesn't move for 2s+ at " + ", ".join(f"{float(a):.1f}s" for a in frozen[:4]))
+    else:
+        notes.append("✓ no frozen picture")
+    if info["audio"]:
+        audio_log = measure(path, "a:ebur128=peak=true,silencedetect=n=-45dB:d=2.5")
+        loud = re.findall(r"I:\s+(-?[\d.]+) LUFS", audio_log.split("Summary:")[-1])
+        if loud:
+            lufs = float(loud[-1])
+            notes.append(f"{'✓' if -17 <= lufs <= -11 else '⚠'} loudness {lufs:.1f} LUFS (social apps like about -14)")
+        silent = re.findall(r"silence_start: ([\d.]+)", audio_log)
+        if silent and not cfg.get("scenes"):
+            notes.append("⚠ 2.5s+ of silence at " + ", ".join(f"{float(a):.1f}s" for a in silent[:4]))
+    else:
+        notes.append("⚠ no sound")
+    if info["height"] > info["width"] and info["seconds"] > 180:
+        notes.append(f"⚠ {info['seconds']:.0f}s is long for Shorts (YouTube Shorts allow 3 minutes; Reels and TikTok work best under 90s)")
+    if cfg.get("captions"):
+        notes.append(face_check(path, cfg, brand, info))
+    return [n for n in notes if n]
+
+
+def face_check(path: Path, cfg: dict, brand: dict, info: dict) -> str:
+    try:
+        import cv2  # optional: pip install opencv-python-headless
+    except ImportError:
+        return "· captions vs faces not checked (pip install opencv-python-headless to check)"
+    caps = brand.get("captions") or {}
+    look = {**DEFAULT_STYLE, **(caps.get("look") or {})}
+    margins = caps.get("margins") or DEFAULT_MARGINS
+    w, h = info["width"], info["height"]
+    tall = h > w
+    place = cfg.get("caption_position") or caps.get("position") or look.get("place") or "bottom"
+    size = float(look.get("size", 0.075)) * min(w, h)
+    m = margins["tall" if tall else "wide"]
+    if place == "top":
+        band = (m["top"] * h, m["top"] * h + size * 2.6)
+    elif place == "middle":
+        band = (h / 2 - size * 1.3, h / 2 + size * 1.3)
+    else:
+        band = (h - m["bottom"] * h - size * 2.6, h - m["bottom"] * h)
+    finder = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    video = cv2.VideoCapture(str(path))
+    hits, looked = [], 0
+    for k in range(8):
+        t = info["seconds"] * (k + 0.5) / 8
+        video.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ok, frame = video.read()
+        if not ok:
+            continue
+        looked += 1
+        grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        for (_x, y, _fw, fh) in finder.detectMultiScale(grey, 1.15, 6, minSize=(int(min(w, h) * 0.12),) * 2):
+            if y < band[1] and y + fh > band[0]:
+                hits.append(t)
+                break
+    video.release()
+    if looked and len(hits) >= max(2, looked // 3):
+        better = "top" if place != "top" else "bottom"
+        return f"⚠ captions cover a face at {', '.join(f'{t:.0f}s' for t in hits[:4])}: try \"caption_position\": \"{better}\" (or a different focus_x)"
+    return "✓ captions clear of faces"
+
+
+def cmd_themes(_args) -> None:
+    say("Themes (\"theme\": \"<name>\" in the plan, or your own: {\"base\": \"bold\", \"caption\": {...}}):",
+        *(f"  {n}: {t['about']} Fonts: {FONT_SOURCES[t['caption_font']][0]} / {FONT_SOURCES[t['title_font']][0]}. "
+          f"Defaults: {', '.join(f'{k} {v}' for k, v in t['defaults'].items()) or 'none'}." for n, t in THEMES.items()),
+        "The Brand Kit's colours and caption accent recolour every theme (\"theme_colours\": true keeps the theme's own).")
+
+
+def cmd_qc(args) -> None:
+    need("ffmpeg")
+    path = Path(args.file).expanduser().resolve()
+    say(f"Checks for {path.name}:", *("  " + n for n in quality_checks(path, {"captions": args.captions}, load_brand())))
+
+
 # ---------------------------------------------------------------- timeline (source times → the edited video's times)
 
 TRANSITIONS = {  # name → ffmpeg xfade type and length (seconds)
@@ -418,6 +727,7 @@ LOOKS = {
     "cinematic": "eq=contrast=1.1:saturation=0.9,colorbalance=rs=-0.04:bs=0.05:rh=0.06:bh=-0.05,vignette=PI/5",
     "soft": "eq=contrast=0.94:brightness=0.02:saturation=0.95",
     "vintage": "curves=preset=vintage,vignette=PI/4",
+    "retro": "curves=preset=vintage,eq=saturation=0.85,noise=alls=12:allf=t,vignette=PI/4",
 }
 
 
@@ -531,16 +841,17 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
     m = margins["tall" if tall else "wide"]
     place = cfg.get("caption_position") or caps.get("position") or look.get("place") or "bottom"
     align, margin_v = {"top": (8, round(m["top"] * height)), "middle": (5, 0)}.get(place, (2, round(m["bottom"] * height)))
-    font_file = caps.get("font_file")
-    family = caps.get("font_family") if font_file and (BRAND_DIR / font_file).exists() else "Arial"
+    family = caps.get("font_family") if caption_font_path(caps) else "Arial"
+    theme = brand.get("theme") or {}
+    title_family = theme.get("title_family") or family
     box = look.get("box")
     border, back = (3, ass_colour(box.get("color"), 1 - float(box.get("alpha", 0.6)))) if box else (1, ass_colour("#000000", 0.5))
     outline = round(float(look.get("outline", 0.07)) * size, 1) if not box else round(size * 0.18, 1)
     side = round(width * 0.08)
     styles = [
         f"Style: Davnai,{family},{size},{ass_colour(look.get('color'))},{ass_colour(look.get('accent'))},{ass_colour(look.get('outlineColor'))},{back},-1,0,0,0,100,100,0,0,{border},{outline},{2 if look.get('shadow') else 0},{align},{side},{side},{margin_v},1",
-        f"Style: Hook,{family},{round(short_side * 0.085)},{ass_colour('#FFFFFF')},{ass_colour('#FFFFFF')},{ass_colour(brand_colour)},{ass_colour(brand_colour)},-1,0,0,0,100,100,0,0,3,{round(short_side * 0.02)},0,8,{side},{side},{round(height * (0.12 if tall else 0.08))},1",
-        f"Style: Callout,{family},{round(short_side * 0.055)},{ass_colour('#111111')},{ass_colour('#111111')},{ass_colour('#FFFFFF')},{ass_colour('#FFFFFF')},-1,0,0,0,100,100,0,0,3,{round(short_side * 0.015)},0,8,{side},{side},{round(height * (0.22 if tall else 0.12))},1",
+        f"Style: Hook,{title_family},{round(short_side * 0.085)},{ass_colour('#FFFFFF')},{ass_colour('#FFFFFF')},{ass_colour(brand_colour)},{ass_colour(brand_colour)},-1,0,0,0,100,100,0,0,3,{round(short_side * 0.02)},0,8,{side},{side},{round(height * (0.12 if tall else 0.08))},1",
+        f"Style: Callout,{title_family},{round(short_side * 0.055)},{ass_colour('#111111')},{ass_colour('#111111')},{ass_colour('#FFFFFF')},{ass_colour('#FFFFFF')},-1,0,0,0,100,100,0,0,3,{round(short_side * 0.015)},0,8,{side},{side},{round(height * (0.22 if tall else 0.12))},1",
     ]
     events = []
     if cfg.get("captions") and words:
@@ -551,6 +862,7 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
         accent = ass_colour(look.get("accent"))
         anim = cfg.get("caption_animation") or look.get("anim") or "pop"
         karaoke = look.get("karaoke", "word") != "none" and (look.get("accent") or "").upper() != (look.get("color") or "").upper()
+        glow = "{\\blur4}" if look.get("glow") else ""
         big = max(1.0, float(look.get("keyScale", 1.0)), 1.15 if emphasis else 1.0)
 
         def word_text(w: list, active: bool) -> str:
@@ -563,15 +875,15 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
 
         for group in caption_groups(words, per_line):
             start, end = group[0][1], max(group[-1][2], group[0][1] + 0.3)
-            intro = ANIM_TAGS.get(anim, "")
+            intro = glow + ANIM_TAGS.get(anim, "")
             if anim == "type":
                 for k, w in enumerate(group):
                     w_end = group[k + 1][1] if k + 1 < len(group) else end
-                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,0,,{' '.join(word_text(x, j == k) for j, x in enumerate(group[: k + 1]))}")
+                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,0,,{glow}{' '.join(word_text(x, j == k) for j, x in enumerate(group[: k + 1]))}")
             elif karaoke:
                 for k, w in enumerate(group):
                     w_end = group[k + 1][1] if k + 1 < len(group) else end
-                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,0,,{intro if k == 0 else ''}{' '.join(word_text(x, j == k) for j, x in enumerate(group))}")
+                    events.append(f"Dialogue: 0,{ass_time(w[1] if k else start)},{ass_time(w_end)},Davnai,,0,0,0,,{intro if k == 0 else glow}{' '.join(word_text(x, j == k) for j, x in enumerate(group))}")
             else:
                 events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Davnai,,0,0,0,,{intro}{' '.join(word_text(x, False) for x in group)}")
     if cfg.get("hook_text"):
@@ -598,7 +910,7 @@ def write_ass(path: Path, width: int, height: int, cfg: dict, brand: dict, words
 
 def end_card_ass(path: Path, width: int, height: int, text: str, brand: dict) -> None:
     caps = brand.get("captions") or {}
-    family = caps.get("font_family") if caps.get("font_file") and (BRAND_DIR / caps["font_file"]).exists() else "Arial"
+    family = (brand.get("theme") or {}).get("title_family") or (caps.get("font_family") if caption_font_path(caps) else "Arial")
     size = round(min(width, height) * 0.08)
     path.write_text("\n".join([
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "WrapStyle: 0", "",
@@ -682,6 +994,21 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         q = Path(str(p)).expanduser()
         return q if q.is_absolute() else (plan_dir / q).resolve()
 
+    def sound(p: str) -> Path:
+        """A sound file of theirs, or a built-in one by name (whoosh, swoosh, pop, click, ding, impact, riser, glitch)."""
+        q = resolve(p)
+        return q if q.exists() else (sound_file(str(p)) or q)
+
+    cfg, brand = themed(cfg, brand, theme_of(cfg, plan))
+    fonts_dir = folder / "fonts"
+    fonts_dir.mkdir(exist_ok=True)
+    theme = brand.get("theme") or {}
+    for fp in (caption_font_path(brand.get("captions") or {}), Path(theme["title_path"]) if theme.get("title_path") else None):
+        if fp and fp.exists():
+            shutil.copy2(fp, fonts_dir / fp.name)
+    auto_sounds: list[tuple[float, str]] = []
+    joins_sound = theme.get("sounds", {}).get("transition") if cfg.get("sounds", True) and cfg.get("transition") not in (None, "cut") else None
+
     aspect = cfg.get("aspect", "9:16")
     focus_x = min(1.0, max(0.0, float(cfg.get("focus_x", 0.5))))
     fill = cfg.get("fill", "crop")
@@ -730,6 +1057,8 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
             graph.append(f"[{prev}]null[vbase]")
         else:
             graph.append("".join(f"[s{k}]" for k in range(len(scenes))) + f"concat=n={len(scenes)}:v=1:a=0[vbase]")
+        if joins_sound:
+            auto_sounds += [(t, joins_sound) for t in starts[1:]]
         vi = add_input("-i", str(voice))
         graph.append(f"[{vi}:a]{AUDIO_FMT}[abase]")
         words = [[w_[0], w_[1], w_[2], ln["id"]] for ln in lines for w_ in ln["words"]]
@@ -788,6 +1117,8 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         graph.append(f"[acut]{','.join(audio_fx) or 'anull'},{AUDIO_FMT}[abase]")
         words = timeline.words(src_words)
         main_len = timeline.duration
+        if joins_sound:
+            auto_sounds += [(g[0]["out"], joins_sound) for g in timeline.groups[1:]]
 
     label = "vbase"
     if cfg.get("look"):
@@ -832,9 +1163,6 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
     if write_ass(ass, w, h, cfg, brand, words, main_len):
         fonts = folder / "fonts"
         fonts.mkdir(exist_ok=True)
-        font_file = (brand.get("captions") or {}).get("font_file")
-        if font_file and (BRAND_DIR / font_file).exists():
-            shutil.copy2(BRAND_DIR / font_file, fonts / Path(font_file).name)
         graph.append(f"[{label}]ass={ass.name}:fontsdir=fonts[vcap]")
         label = "vcap"
     colours = [c.get("hex") for c in brand.get("colours") or [] if c.get("hex")]
@@ -863,10 +1191,15 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
         window = line_window(words, int(line), int(line)) if line is not None else None
         if window is None:
             raise Problem(f"Sound effect {k + 1}: line {line} isn't in this video.")
-        fi = add_input("-i", str(resolve(item.get("file") or "")))
+        fi = add_input("-i", str(sound(item.get("file") or "")))
         ms = max(0, round((window[0] - 0.1) * 1000))
         graph.append(f"[{fi}:a]{AUDIO_FMT},volume={float(item.get('volume', 0.6)):g},adelay={ms}|{ms}[fx{k}]")
         mixes.append(f"[fx{k}]")
+    for k, (at, name_) in enumerate(auto_sounds):  # the theme's sound on each transition
+        fi = add_input("-i", str(sound_file(name_)))
+        ms = max(0, round((at - 0.18) * 1000))
+        graph.append(f"[{fi}:a]{AUDIO_FMT},volume=0.45,adelay={ms}|{ms}[ax{k}]")
+        mixes.append(f"[ax{k}]")
     if mixes:
         graph.append(f"[{alabel}]{''.join(mixes)}amix=inputs={len(mixes) + 1}:duration=first:normalize=0[amix]")
         alabel = "amix"
@@ -923,7 +1256,8 @@ def render_output(plan_dir: Path, cfg: dict, plan: dict, brand: dict, final: boo
     (folder / f"{name}_v{version}.timing.json").write_text(json.dumps(timing), encoding="utf-8")
     if cfg.get("motion"):
         apply_motion(out, cfg, brand, timing, w, h, fps, final, folder, f"{name}_v{version}", plan_dir)
-    return out
+    checks = quality_checks(out, cfg, brand) if (final or main_len <= 180) and cfg.get("checks", True) else []
+    return out, checks
 
 
 # ---------------------------------------------------------------- motion graphics (HyperFrames)
@@ -949,16 +1283,23 @@ def brand_look(brand: dict) -> dict:
     caps = brand.get("captions") or {}
     look = {**DEFAULT_STYLE, **(caps.get("look") or {})}
     colours = [c.get("hex") for c in brand.get("colours") or [] if c.get("hex")]
-    font_file = caps.get("font", {}).get("name") if isinstance(caps.get("font"), dict) else None
+    theme = brand.get("theme") or {}
+    font_path = Path(theme["title_path"]) if theme.get("title_path") else caption_font_path(caps)
+    if not font_path:
+        kit_font = caps.get("font", {}).get("name") if isinstance(caps.get("font"), dict) else None
+        font_path = BRAND_DIR / "fonts" / kit_font if kit_font and (BRAND_DIR / "fonts" / kit_font).exists() else None
     return {
         "primary": colours[0] if colours else "#4F46E5",
         "secondary": colours[1] if len(colours) > 1 else "#111827",
         "accent": look.get("accent") or "#FACC15",
         "text": "#FFFFFF",
-        "font": caps.get("font_family") or "Arial",
-        "font_file": f"fonts/{font_file}" if font_file and (BRAND_DIR / "fonts" / font_file).exists() else None,
+        "font": theme.get("title_family") or caps.get("font_family") or "Arial",
+        "font_path": str(font_path) if font_path and font_path.exists() else None,
         "logo": (brand.get("logo") or {}).get("file"),
         "handle": brand.get("handle") or "",
+        "theme": theme.get("name"),
+        "title_style": theme.get("title_style") or "pop",
+        "sound": (theme.get("sounds") or {}).get("motion"),
     }
 
 
@@ -999,11 +1340,11 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
     attrs = f'id="{mid}" data-start="{t0:.3f}" data-duration="{dur:.3f}"'
     pos = item.get("position", "")
     if kind == "title":
-        style = item.get("style", "pop")
+        style = item.get("style") or look.get("title_style") or "pop"
         text = str(item.get("text", ""))
         inner = "".join(f'<span class="w">{esc(x)}</span> ' for x in text.split()) if style in ("words", "typewriter") else esc(text)
-        if style == "typewriter":
-            inner = "".join(f'<span class="c">{esc(c) if c != " " else "&nbsp;"}</span>' for c in text)
+        if style == "typewriter":  # letters appear one by one, but words never break across lines
+            inner = " ".join('<span class="word">' + "".join(f'<span class="c">{esc(c)}</span>' for c in word) + "</span>" for word in text.split())
         html = f'<div {attrs} class="g" style="{spot(pos or "top", w, h)}left:{round(6 * u)}px;right:{round(6 * u)}px;text-align:center"><div class="box title">{inner}</div></div>'
         anim = {
             "pop": f'tl.from("#{mid} .box",{{scale:0.3,autoAlpha:0,duration:0.45,ease:"back.out(2.2)"}},{t0:.3f});',
@@ -1104,8 +1445,8 @@ def motion_item(k: int, item: dict, t0: float, dur: float, w: int, h: int, look:
 
 def motion_css(w: int, h: int, look: dict) -> str:
     u = min(w, h) / 100
-    face = f'@font-face{{font-family:"DavnaiBrand";src:url("{look["font_file"]}");font-weight:100 900}}' if look["font_file"] else ""
-    family = '"DavnaiBrand",' if look["font_file"] else ""
+    face = f'@font-face{{font-family:"DavnaiBrand";src:url("fonts/{Path(look["font_path"]).name}");font-weight:100 900}}' if look.get("font_path") else ""
+    family = '"DavnaiBrand",' if look.get("font_path") else ""
     p, s, a, t = look["primary"], look["secondary"], look["accent"], look["text"]
     return f"""{face}
 html,body{{margin:0;background:#000}}
@@ -1115,6 +1456,7 @@ video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
 .box{{display:inline-block;background:{p};color:{t};border-radius:{round(2.2 * u)}px;padding:{round(1.2 * u)}px {round(2.6 * u)}px;box-shadow:0 {round(u)}px {round(3 * u)}px rgba(0,0,0,.35)}}
 .title{{font-size:{round(8 * u)}px;line-height:1.1;font-weight:900}}
 .title .w,.title .c{{display:inline-block}}
+.title .word{{display:inline-block;white-space:nowrap}}
 .callout{{font-size:{round(5.5 * u)}px;background:{a};color:#111}}
 .emoji{{font-size:{round(16 * u)}px}}
 .lt-bar{{width:{round(48 * u)}px;height:{round(1.2 * u)}px;background:{a};margin-bottom:{round(1.2 * u)}px}}
@@ -1141,7 +1483,7 @@ video.base{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}
 .handle{{font-size:{round(5 * u)}px;margin-top:{round(2 * u)}px;color:{a}}}
 .btn{{display:inline-block;margin-top:{round(4 * u)}px;background:{t};color:{p};border-radius:{round(5 * u)}px;padding:{round(1.6 * u)}px {round(6 * u)}px;font-size:{round(5 * u)}px}}
 .logo{{max-width:{round(30 * u)}px;max-height:{round(16 * u)}px;margin-bottom:{round(3 * u)}px}}
-"""
+""" + THEME_CSS.get(look.get("theme") or "", "").format(s=round(1.2 * u), t=round(9.5 * u), h=max(2, round(0.4 * u)), g=round(2.5 * u), a=a, p=p)
 
 
 def merge_windows(spans: list[tuple[float, float, int]]) -> list[tuple[float, float, list[int]]]:
@@ -1177,9 +1519,9 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
             project = work / f"seg{g}"
             project.mkdir(parents=True)
             shutil.copy2(gsap, project / "gsap.min.js")
-            if look["font_file"]:
+            if look.get("font_path"):
                 (project / "fonts").mkdir(exist_ok=True)
-                shutil.copy2(BRAND_DIR / look["font_file"], project / look["font_file"])
+                shutil.copy2(look["font_path"], project / "fonts" / Path(look["font_path"]).name)
             parts, anims = [], []
             for k in ks:
                 ia, ib, _ = spans[k]
@@ -1210,7 +1552,21 @@ def apply_motion(out: Path, cfg: dict, brand: dict, timing: dict, w: int, h: int
             chain.append(f"[{label}][{g + 1}:v]overlay=0:0:eof_action=pass[o{g}]")
             label = f"o{g}"
         quality = ["-c:v", "libx264", "-preset", "medium", "-crf", "19"] if final else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28"]
-        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", "-map", "0:a?", *quality, "-c:a", "copy", "-movflags", "+faststart", str(out)])
+        # The theme's sound as each graphic appears (unless "sounds": false), mixed under the voice.
+        pops = [(spans[k][0], items[k].get("sound") or look.get("sound")) for k in range(len(items)) if cfg.get("sounds", True) and items[k].get("sound", True) is not False]
+        pops = [(t, sound_file(str(n))) for t, n in pops if n and sound_file(str(n))]
+        audio = ["-map", "0:a?", "-c:a", "copy"]
+        if pops and probe(base)["audio"]:
+            mix = []
+            for j, (t, path) in enumerate(pops):
+                inputs += ["-i", str(path)]
+                idx = len(segments) + 1 + j
+                ms = max(0, round(t * 1000))
+                chain.append(f"[{idx}:a]{AUDIO_FMT},volume=0.4,adelay={ms}|{ms}[p{j}]")
+                mix.append(f"[p{j}]")
+            chain.append(f"[0:a]{''.join(mix)}amix=inputs={len(mix) + 1}:duration=first:normalize=0[amx]")
+            audio = ["-map", "[amx]", "-c:a", "aac", "-b:a", "160k" if final else "96k"]
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(chain), "-map", f"[{label}]", *audio, *quality, "-movflags", "+faststart", str(out)])
         base.unlink(missing_ok=True)
         if final:
             shutil.rmtree(work, ignore_errors=True)
@@ -1302,7 +1658,8 @@ def cmd_storyboard(args) -> None:
     for cfg in outputs:
         name = cfg.get("name") or "video"
         scenes, total = scene_list(cfg, plan, plan_path.parent)
-        extras = [x for x in ("hook_text", "captions", "auto_zoom", "progress_bar", "end_card", "music", "intro", "outro", "logo") if cfg.get(x)]
+        theme = cfg.get("theme") or plan.get("theme")
+        extras = ([f"theme {theme if isinstance(theme, str) else theme.get('base', 'custom') + ' (custom)'}"] if theme else []) + [x for x in ("hook_text", "captions", "auto_zoom", "progress_bar", "end_card", "music", "intro", "outro", "logo") if cfg.get(x)]
         text.append(f"Storyboard: {name} ({cfg.get('aspect', '9:16')}, about {total:.0f}s){' · ' + ', '.join(extras) if extras else ''}")
         if cfg.get("hook_text"):
             text.append(f"  Opens with: \"{cfg['hook_text']}\"")
@@ -1363,8 +1720,8 @@ def ask(question: str, yes: bool) -> bool:
 
 def cmd_setup(args) -> None:
     lines, restart = [], False
-    pip = [sys.executable, "-m", "pip", "install", "--user", "--quiet", "faster-whisper", "fonttools", "brotli"]
-    say("Installing the Python parts (speech-to-text, brand fonts)...")
+    pip = [sys.executable, "-m", "pip", "install", "--user", "--quiet", "faster-whisper", "fonttools", "brotli", "opencv-python-headless"]
+    say("Installing the Python parts (speech-to-text, brand fonts, face check)...")
     proc = subprocess.run(pip, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0 and "externally-managed" in (proc.stderr or ""):
         proc = subprocess.run([*pip, "--break-system-packages"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1384,6 +1741,10 @@ def cmd_setup(args) -> None:
             lines.append(f"✗ {label}: install it from {'https://nodejs.org' if tool == 'node' else 'https://ffmpeg.org/download.html'} (Linux: sudo apt install {'nodejs' if tool == 'node' else 'ffmpeg'})")
         else:
             lines.append(f"· {label} skipped")
+    if shutil.which("ffmpeg"):
+        fonts = ensure_fonts(FONT_SOURCES)
+        made = [n for n in SOUND_RECIPES if sound_file(n)]
+        lines.append(f"✓ theme fonts ({len(fonts)}/{len(FONT_SOURCES)}) and built-in sounds ({len(made)})")
     if args.motion:
         npm = shutil.which("npm")
         if node_major() >= 22 and npm:
@@ -1441,12 +1802,13 @@ def cmd_render(args) -> None:
         if not args.final:
             (folder / f"{name}_v{version}.plan.json").write_text(json.dumps(cfg, indent=1), encoding="utf-8")
         start = time.time()
-        out = render_output(plan_path.parent, cfg, plan, brand, args.final, version, folder)
+        out, checks = render_output(plan_path.parent, cfg, plan, brand, args.final, version, folder)
         info = probe(out)
         made.append(f"{'Final' if args.final else f'Preview v{version}'} of {name}: {out} ({info['seconds']:.1f}s, {info['width']}x{info['height']}, made in {time.time() - start:.0f}s)")
+        made += [f"  {c}" for c in checks]
     say(*made)
     if not args.final:
-        say("Ask the person to watch it and say what to change. Make the final only when they say it's the one (--final).")
+        say("Fix anything marked ⚠ first (or tell the person why it's fine). Then ask them to watch it and say what to change. Make the final only when they say it's the one (--final).")
 
 
 # ---------------------------------------------------------------- frame
@@ -1564,6 +1926,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--voice", default="af_heart", help="e.g. af_heart, am_michael, bf_emma, bm_george")
     p.add_argument("--speed", type=float, default=1.0)
     p.set_defaults(fn=cmd_voice)
+    sub.add_parser("themes", help="the built-in themes").set_defaults(fn=cmd_themes)
+    p = sub.add_parser("qc", help="quality checks on a video (black or frozen picture, loudness, captions over faces)")
+    p.add_argument("file")
+    p.add_argument("--captions", action="store_true", help="also check captions against faces")
+    p.set_defaults(fn=cmd_qc)
     p = sub.add_parser("probe", help="size and length for upload_from_computer")
     p.add_argument("file")
     p.set_defaults(fn=cmd_probe)

@@ -1,5 +1,7 @@
 # Effects
 
+Start with a theme (`themes.md`): it sets captions, titles, graphics, transitions, colour and sounds in one word. Then add effects below for this video.
+
 Animated graphics (titles, lower thirds, counters, lists, charts, end screens) are in `motion.md`. Add these to an output in `plan.json`. Lines are transcript line numbers (never times). Use a few that fit the video; more isn't better. Captions, a strong hook and pace matter most; the rest is seasoning.
 
 | What | In the plan | Notes |
@@ -14,9 +16,9 @@ Animated graphics (titles, lower thirds, counters, lists, charts, end screens) a
 | B-roll cutaway | `"broll": [{ "lines": [20, 22], "clip": "clips/office.mp4" }]` | Covers the speaker while they keep talking. A picture works too. `start` skips into the clip. |
 | Picture-in-picture | `"broll": [{ "lines": [30, 31], "clip": "shots/app.png", "mode": "pip", "position": "top-right" }]` | Small framed window. `"mode": "sticker"` for a small picture without a frame (an emoji or icon). |
 | Blurred background | `"fill": "blur"` | A wide video in a tall frame without cropping: the whole picture over a blurred copy (podcasts, screen recordings). |
-| Colour look | `"look": "warm"` | warm, cool, vivid, punchy, bw, cinematic, soft, vintage. |
+| Colour look | `"look": "warm"` | warm, cool, vivid, punchy, bw, cinematic, soft, vintage, retro (with film grain). |
 | Progress bar | `"progress_bar": true` | Thin bar in the brand colour (bottom; `"top"` for the top). |
-| Sound effects | `"sfx": [{ "line": 14, "file": "sounds/whoosh.mp3", "volume": 0.6 }]` | Plays as that line starts. Their own or free sound files. |
+| Sound effects | `"sfx": [{ "line": 14, "file": "whoosh", "volume": 0.6 }]` | Plays as that line starts. Built-in sounds (made on the computer, nothing to licence): whoosh, swoosh, pop, click, ding, impact, riser, glitch; or a file of theirs. Themes add a sound on each transition and graphic; `"sounds": false` turns those off. |
 | Music | `"music": "music/calm.mp3", "music_volume": 0.12` | Under the voice, for the whole video. |
 | Speed | `"speed": 1.1` | 0.5 to 2. 1.05 to 1.15 tightens a slow talker. |
 | Cleaner voice | `"clean_audio": true` | Takes out hum and background hiss. |

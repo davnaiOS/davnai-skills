@@ -196,3 +196,52 @@ def test_storyboard_lists_scenes_and_writes_a_picture_page(tmp_path, capsys):
     assert "1. lines 3-4" in out and "lower_third: Ada" in out and "Opens with: \"Hook\"" in out
     page = (folder / "plan_storyboard.html").read_text()
     assert page.count('class="card"') == 2 and "data:image/jpeg;base64," in page
+
+
+def test_every_theme_is_complete():
+    assert len(davnai.THEMES) == 12
+    for name, theme in davnai.THEMES.items():
+        assert theme["caption_font"] in davnai.FONT_SOURCES and theme["title_font"] in davnai.FONT_SOURCES, name
+        assert theme["title_style"] in ("pop", "slide", "bounce", "words", "typewriter", "glow"), name
+        assert set(theme["sounds"].values()) <= set(davnai.SOUND_RECIPES), name
+        for key in ("look", "transition"):
+            value = theme["defaults"].get(key)
+            assert value is None or value in (davnai.LOOKS if key == "look" else davnai.TRANSITIONS), (name, value)
+        if name in davnai.THEME_CSS:
+            davnai.THEME_CSS[name].format(s=1, t=1, h=1, g=1, a="#fff", p="#000")
+
+
+def test_themes_apply_under_the_plan_and_take_the_brand_colours(monkeypatch, tmp_path):
+    monkeypatch.setattr(davnai, "ensure_fonts", lambda names: {n: tmp_path / n for n in names})
+    for n in davnai.FONT_SOURCES:
+        (tmp_path / n).write_bytes(b"x")
+    brand = {"colours": [{"hex": "#123456"}], "captions": {"look": {"accent": "#ABCDEF"}}}
+    cfg, kit = davnai.themed({"transition": "cut"}, brand, davnai.theme_of({"theme": "bold"}, {}))
+    assert cfg["transition"] == "cut" and cfg["look"] == "punchy" and cfg["auto_zoom"] is True  # the plan wins; the rest comes from the theme
+    assert kit["captions"]["look"]["accent"] == "#ABCDEF" and kit["captions"]["font_family"] == "Anton"
+    assert davnai.brand_look(kit)["primary"] == "#123456" and davnai.brand_look(kit)["theme"] == "bold"
+    _, own = davnai.themed({"theme_colours": True}, brand, davnai.theme_of({}, {"theme": "neon"}))
+    assert own["captions"]["look"]["accent"] == "#22D3EE" and own["colours"] == []
+    custom = davnai.theme_of({"theme": {"base": "clean", "caption": {"words": 2}, "title_font": "BebasNeue-Regular.ttf"}}, {})
+    assert custom["caption"]["words"] == 2 and custom["title_font"] == "BebasNeue-Regular.ttf" and custom["caption"]["size"] == davnai.THEMES["clean"]["caption"]["size"]
+    with pytest.raises(davnai.Problem):
+        davnai.theme_of({"theme": "nope"}, {})
+    with pytest.raises(davnai.Problem):
+        davnai.theme_of({"theme": {"base": "clean", "title_font": "Comic.ttf"}}, {})
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_built_in_sounds_are_made_on_the_computer(monkeypatch, tmp_path):
+    monkeypatch.setattr(davnai, "SOUNDS_DIR", tmp_path)
+    for name in davnai.SOUND_RECIPES:
+        info = davnai.probe(davnai.sound_file(name))
+        assert info["audio"] and 0.05 < info["seconds"] < 2, name
+    assert davnai.sound_file("nope") is None
+
+
+@pytest.mark.skipif(not FFMPEG, reason="needs ffmpeg")
+def test_quality_checks_find_black_and_quiet_video(tmp_path):
+    bad = tmp_path / "bad.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=3", "-f", "lavfi", "-i", "sine=frequency=300:d=3", "-filter:a", "volume=0.05", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(bad)], check=True)
+    notes = davnai.quality_checks(bad, {}, {})
+    assert any(n.startswith("⚠ black picture") for n in notes) and any("⚠ loudness" in n for n in notes)
